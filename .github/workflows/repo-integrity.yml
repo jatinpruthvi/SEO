@@ -71,8 +71,13 @@ jobs:
           BASE="$(git rev-parse --verify 'HEAD^' 2>/dev/null || echo "$EMPTY_TREE")"
           CHANGED="$(git diff --name-status "$BASE" HEAD || true)"
           COUNT="$(printf '%s\n' "$CHANGED" | grep -c . || true)"
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TITLE="Push report"
+          else
+            TITLE="Latest commit report"
+          fi
           {
-            echo "## Push report: $COUNT file(s) changed"
+            echo "## $TITLE: $COUNT file(s) changed"
             echo
             echo '<details><summary>Added (A) / Modified (M) / Deleted (D)</summary>'
             echo
@@ -85,13 +90,13 @@ jobs:
             echo '```'
             echo '</details>'
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "changed=$COUNT" >> "$GITHUB_OUTPUT"
 
       - name: Whitespace errors in the pushed diff
         run: |
           EMPTY_TREE=4b825dc642cb6eb9a060e54bf8d69288fbee4904
           BASE="$(git rev-parse --verify 'HEAD^' 2>/dev/null || echo "$EMPTY_TREE")"
-          if ! git diff --check "$BASE" HEAD; then
+          # cr-at-eol: repos are Windows-authored; don't flag carriage returns as trailing whitespace.
+          if ! git -c core.whitespace=cr-at-eol diff --check "$BASE" HEAD; then
             echo "::warning::Whitespace errors (trailing whitespace / missing newline) in the pushed changes"
           fi
 
