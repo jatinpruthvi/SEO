@@ -1,0 +1,143 @@
+name: Repo Integrity Check
+
+# Verifies that the pushed commit tree is complete and healthy, and
+# reports every file added / modified / deleted in the push.
+#
+# Runs on:
+#   - every push to main or master
+#   - a weekly schedule (Monday 03:00 UTC)
+#   - manual runs (Actions tab -> "Run workflow")
+
+on:
+  push:
+    branches: [main, master]
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repo-integrity-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integrity:
+    name: Verify tree integrity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Git object database integrity
+        run: |
+          if ! git fsck --full --no-dangling; then
+            echo "::error::git fsck reported problems with the pushed tree"
+            exit 1
+          fi
+          echo "::notice::git fsck: object database is healthy"
+
+      - name: Working tree matches HEAD
+        run: |
+          dirty="$(git status --porcelain)"
+          if [ -n "$dirty" ]; then
+            echo "::error::Working tree does not match the committed tree:"
+            printf '%s\n' "$dirty" | head -50
+            exit 1
+          fi
+          echo "::notice::Working tree is clean (matches HEAD exactly)"
+
+      - name: Every tracked file is present
+        run: |
+          fail=0
+          while IFS= read -r f; do
+            if [ ! -e "$f" ]; then
+              echo "::error::Tracked file missing from checkout: $f"
+              fail=1
+            fi
+          done < <(git ls-files)
+          if [ "$fail" -ne 0 ]; then
+            exit 1
+          fi
+          echo "::notice::All $(git ls-files | wc -l) tracked files are present"
+
+      - name: Report files changed by this push
+        run: |
+          # Well-known empty-tree SHA: the first commit on a branch reports every file as added.
+          EMPTY_TREE=4b825dc642cb6eb9a060e54bf8d69288fbee4904
+          BASE="$(git rev-parse --verify 'HEAD^' 2>/dev/null || echo "$EMPTY_TREE")"
+          CHANGED="$(git diff --name-status "$BASE" HEAD || true)"
+          COUNT="$(printf '%s\n' "$CHANGED" | grep -c . || true)"
+          {
+            echo "## Push report: $COUNT file(s) changed"
+            echo
+            echo '<details><summary>Added (A) / Modified (M) / Deleted (D)</summary>'
+            echo
+            echo '```'
+            if [ "${COUNT:-0}" -gt 0 ]; then
+              printf '%s\n' "$CHANGED"
+            else
+              echo "(no file changes detected)"
+            fi
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "changed=$COUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Whitespace errors in the pushed diff
+        run: |
+          EMPTY_TREE=4b825dc642cb6eb9a060e54bf8d69288fbee4904
+          BASE="$(git rev-parse --verify 'HEAD^' 2>/dev/null || echo "$EMPTY_TREE")"
+          if ! git diff --check "$BASE" HEAD; then
+            echo "::warning::Whitespace errors (trailing whitespace / missing newline) in the pushed changes"
+          fi
+
+      - name: Large file check
+        run: |
+          # GitHub's hard per-file limit is 100 MB.
+          over="$(find . -type f -not -path './.git/*' -size +100M)"
+          if [ -n "$over" ]; then
+            echo "::error::Files exceed GitHub's 100 MB per-file limit:"
+            printf '%s\n' "$over"
+            exit 1
+          fi
+          big="$(find . -type f -not -path './.git/*' -size +10M)"
+          if [ -n "$big" ]; then
+            echo "::warning::Large files (>10 MB) are committed:"
+            printf '%s\n' "$big"
+          fi
+
+      - name: Tracked files shadowed by .gitignore
+        run: |
+          shadowed="$(git ls-files -ci --exclude-standard)"
+          if [ -n "$shadowed" ]; then
+            echo "::warning::Tracked files also match .gitignore rules (risk of accidental exclusion):"
+            printf '%s\n' "$shadowed"
+          else
+            echo "::notice::No tracked file is shadowed by .gitignore"
+          fi
+
+      - name: Secret scan (high-signal patterns -> fails the check)
+        run: |
+          PATTERN='ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----'
+          hits="$(git grep -n -I -E "$PATTERN" || true)"
+          if [ -n "$hits" ]; then
+            echo "::error::Possible secret (GitHub token / AWS key / private key) found in tracked files:"
+            printf '%s\n' "$hits" | head -20
+            exit 1
+          fi
+          echo "::notice::No high-signal secrets found"
+
+      - name: Secret scan (lower-signal patterns -> warning only)
+        run: |
+          PATTERN='sk-[A-Za-z0-9]{20,}|xox[bap]-[A-Za-z0-9-]{10,}|glpat-[A-Za-z0-9_]{20,}'
+          hits="$(git grep -n -I -E "$PATTERN" || true)"
+          if [ -n "$hits" ]; then
+            echo "::warning::Possible API tokens found (review these lines):"
+            printf '%s\n' "$hits" | head -20
+          else
+            echo "::notice::No lower-signal token patterns found"
+          fi
