@@ -1,0 +1,87 @@
+# docker-compose.complete.yml - Production-grade CloakBrowser deployment
+#
+# Usage:
+#   # Build and start with GUI access
+#   docker-compose -f docker-compose.complete.yml up -d
+#   # Open http://localhost:6080/vnc.html in your browser
+#   # VNC password: cloak (change VNC_PASSWORD env var)
+#
+#   # Auto-run the CreepJS demo on startup
+#   DEMO=1 docker-compose -f docker-compose.complete.yml up
+#
+#   # Run with a residential proxy
+#   HTTP_PROXY=socks5://user:pass@proxy.example.com:1080 \
+#   docker-compose -f docker-compose.complete.yml up -d
+
+version: '3.8'
+
+services:
+  cloak:
+    build:
+      context: .
+      dockerfile: Dockerfile.complete
+    image: cloak-complete:latest
+    container_name: cloak-complete
+    ports:
+      - "5900:5900"    # VNC
+      - "6080:6080"    # noVNC (browser-accessible)
+    environment:
+      # Display
+      - RESOLUTION=1920x1080x24
+      - VNC_PASSWORD=cloak          # CHANGE THIS in production
+      - VNC_PORT=5900
+      - NOVNC_PORT=6080
+      # Mode: 0=idle/VNC only, 1=run demo
+      - DEMO=0
+      - INTERACTIVE=0
+      # CloakBrowser
+      - CLOAKBROWSER_NO_SANDBOX=true
+      # Proxy (uncomment and set for production)
+      # - HTTP_PROXY=socks5://user:pass@host:1080
+      # - HTTPS_PROXY=socks5://user:pass@host:1080
+      # Persona
+      - PERSONA=chrome-128-win
+    volumes:
+      # Persistent persona data and results
+      - cloak-data:/data
+      - cloak-config:/root/.cloak
+      # Mount your main.py if running a custom app
+      - ./app:/app
+    # Chromium needs lots of shared memory for stability
+    shm_size: '2gb'
+    # Limit resources to prevent runaway
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2'
+    # Auto-restart unless explicitly stopped
+    restart: unless-stopped
+    # Healthcheck from compose side (in addition to in-image)
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:6080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # Optional: separate test runner container that hits CreepJS and
+  # reports the trust score. Useful for CI.
+  cloak-tester:
+    build:
+      context: .
+      dockerfile: Dockerfile.complete
+    image: cloak-complete:latest
+    container_name: cloak-tester
+    environment:
+      - HEADLESS=1
+      - DEMO=1
+      - PERSONA=chrome-128-win
+    profiles: ["test"]  # Only starts with --profile test
+    volumes:
+      - test-results:/tmp
+
+volumes:
+  cloak-data:
+  cloak-config:
+  test-results:

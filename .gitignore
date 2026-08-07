@@ -1,0 +1,32 @@
+# Local / container scratch
+.local/
+home/
+.sudo_as_admin_successful
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node
+node_modules/
+
+# Environment & secrets
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Backups
+*.bak
+
+# Databases
+*.db
+*.sqlite
+
+# OS
+.DS_Store
+Thumbs.db

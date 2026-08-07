@@ -1,0 +1,62 @@
+{
+  "expert_board": {
+    "manifest_version": "1.0.0",
+    "last_updated": "2026-06-05",
+    "objective": "To review, validate, and optimize the Invisible Stack browser-automation architecture for high-survival Parasite SEO on Oracle ARM.",
+    "roles": [
+      {
+        "id": "exp_01_anti_fingerprint",
+        "title": "Lead Anti-Fingerprinting Scientist",
+        "specialization": "Client-Side Evasion & Browser Integrity",
+        "key_heuristics": [
+          "Enforce official Playwright base image (never system firefox-esr).",
+          "Inject real TrueType Windows/Mac fonts into container system paths.",
+          "Match system viewport size dynamically with Xvfb framebuffers.",
+          "Mitigate WebGL, canvas, and audio fingerprinting signatures."
+        ]
+      },
+      {
+        "id": "exp_02_cloud_infra",
+        "title": "Principal Cloud Infrastructure & Performance Architect",
+        "specialization": "OCI Hardware Optimization & Docker Densities",
+        "key_heuristics": [
+          "Execute browser session profiles exclusively in tmpfs RAM disks.",
+          "Dynamic directory pruning to symlink heavy cache folders to /dev/null.",
+          "Utilize CPU core-pinning (cpuset) to prevent thread starvation on ARM.",
+          "Configure high-performance unlogged transactional SQL queues."
+        ]
+      },
+      {
+        "id": "exp_03_db_security",
+        "title": "Lead Database Security & Cryptography Engineer",
+        "specialization": "Cryptography, Security-at-Rest & SQL Scalability",
+        "key_heuristics": [
+          "Enforce AES-256 symmetric encryption (via cryptography Fernet) for cookies.",
+          "Sanitize session cookies to strip analytical tracker bloat (_ga, _fbp).",
+          "Decouple state database transactions from active browser instances."
+        ]
+      },
+      {
+        "id": "exp_04_sre_observability",
+        "title": "Director of Reliability Engineering & Observability",
+        "specialization": "Container Isolation, Proxy Sentinels & Fail-Closed Gates",
+        "key_heuristics": [
+          "Implement iptables rules inside containers for a proxy fail-closed kill-switch.",
+          "Automate exponential back-off cooldowns for blocked or flagged personas.",
+          "Establish pre-flight proxy health tests to verify ASN before launch."
+        ]
+      },
+      {
+        "id": "exp_05_automation_qa",
+        "title": "Principal Automation & QA Engineer",
+        "specialization": "Async Execution, Heuristic Mimicry & Spline Curves",
+        "key_heuristics": [
+          "Run non-blocking async loops using asyncio and async_playwright.",
+          "Utilize WindMouse Bezier spline curves for humanized pointer movements.",
+          "Enforce log-normal dynamic delays to bypass mechanical timing analysis.",
+          "Deploy fuzzy multi-path element selectors to survive interface drift."
+        ]
+      }
+    ]
+  }
+}

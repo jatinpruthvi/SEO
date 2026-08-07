@@ -1,0 +1,611 @@
+# =====================================================================
+# ZERO-TRUST / ZERO-FINGERPRINT RESILIENT ARCHITECTURE v5.0+
+# MAX_CONCURRENT_PERSONAS=1 (absolute invisibility ceiling)
+# All high+low priority suggestions from architect review integrated.
+#
+# v5.0+: Maximum 1 persona for absolute invisibility. Single-persona
+#        operation eliminates all cross-account correlation vectors.
+# v5.0+: Per-persona retirement (8-12 tasks max), 6h rotation, 45min
+#        max session, 30-180s quiescence before task, 5-15min cooldown
+#        after task.
+# v5.0+: gVisor (runsc) runtime for userspace syscall interception.
+# v5.0+: /proc, /sys, /dev whitelisting. Filtered DMI/boot_id/host leaks.
+# v5.0+: Boot-ID mount (per-persona stable fake UUID, NOT host's real).
+# v5.0+: Per-persona MAC randomization.
+# v5.0+: uTLS HelloChrome_120 TLS fingerprint alignment.
+# v5.0+: First-navigation-delay 8-25s; about:blank in history.
+# v5.0+: All CloakBrowser API lockouts (Bluetooth, USB, PaymentRequest,
+#        Credential Management, Notification, Reporting, Push, Background
+#        Sync, chrome://flags, CDP).
+# v5.0+: Locked per-persona values (audio sampleRate, screen colorDepth,
+#        deviceMemory, timeZone, scroll-behavior, Battery, Intl).
+# v5.0+: Container is restart:no. host vm.erase_memory_on_free=1, ulimit
+#        core=0, swap=0, no dmesg, no syslog.
+# v5.0+: Per-task tmpfs lifecycle, 1500M per task, single-tmpfs invariant.
+# v5.0+: SIGUSR1 panic with full cleanup including tc qdisc/netem.
+# v5.0+: Compositor jitter integration in behavioral_entropy.
+# v5.0+: Init script registered BEFORE first browser.new_page().
+# v5.0+: Per-persona PID budget tracking.
+# v5.0+: Per-persona SOCKS5 port routing.
+# v5.0+: SYS_ADMIN dropped: pre-mount tmpfs in entrypoint.sh, orchestrator
+#        only mkdir/extract/wipe.
+# =====================================================================
+
+x-stealth-sysctls: &stealth-sysctls
+  # v6.0+: Debian 12 / Linux 6.1.x defaults (not Windows).
+  # net.* only (cgroup-v2 silently rejects kernel.*, vm.* here).
+  net.ipv6.conf.all.disable_ipv6: 1
+  net.ipv6.conf.default.disable_ipv6: 1
+  net.ipv6.conf.lo.disable_ipv6: 1
+  net.ipv4.tcp_timestamps: 1
+  net.ipv4.tcp_syncookies: 1
+  net.ipv4.tcp_sack: 1
+  net.ipv4.tcp_dsack: 1
+  net.ipv4.tcp_keepalive_time: 7200
+  net.ipv4.tcp_keepalive_intvl: 75
+  net.ipv4.tcp_keepalive_probes: 9
+  net.ipv4.conf.all.accept_redirects: 0
+  net.ipv4.conf.default.accept_redirects: 0
+  net.ipv4.conf.all.send_redirects: 0
+  net.ipv4.conf.default.send_redirects: 0
+  net.ipv4.icmp_echo_ignore_all: 0
+  net.ipv4.ip_default_ttl: 64
+  net.ipv4.tcp_mtu_probing: 0
+  net.ipv4.tcp_rmem: 4096 87380 6291456
+  net.ipv4.tcp_wmem: 4096 16384 4194304
+  # Note: the entrypoint.sh MSS clamp is primary control; this is
+  # belt-and-suspenders. Orchestrator's tcp_rmem/tcp_wmem is reduced
+  # below for tight memory budget at 1 persona.
+  # SRE: SYN-ACK MSS echo consistency
+  net.ipv4.tcp_sack: 1
+
+x-orch-mss-sysctls: &orch-mss-sysctls
+  # Only for orchestrator: clamp MSS at the TCP level
+  net.ipv4.tcp_rmem: 4096 87380 1200000
+  net.ipv4.tcp_wmem: 4096 65536 1200000
+
+x-no-logging: &no-logging
+  # Log driver none: container stdout/stderr go to /dev/null. No docker logs.
+  logging:
+    driver: "none"
+
+# =====================================================================
+# v5.0+: Custom seccomp profile (Chromium-specific, ~80 syscalls).
+# Drops perf_event_open, bpf, raw socket. Dropped as a bind-mount.
+# Compose will use `seccomp:` with the profile path. The orchestrator
+# container references it below.
+# =====================================================================
+
+services:
+
+  # -------------------------------------------------------------------
+  # DOH PROXY: Encrypted DNS Shield
+  # -------------------------------------------------------------------
+  doh-proxy:
+    image: cloudflare/cloudflared:2024.12.2
+    container_name: dns-shield
+    environment:
+      TZ: UTC
+    command:
+      - proxy-dns
+      - --port
+      - "53"
+      - --address
+      - "0.0.0.0"
+      - --upstream
+      - "https://9.9.9.10/dns-query"
+      - "https://1.1.1.1/dns-query"
+      - "--metrics"
+      - "localhost:0"
+      - "--no-autoupdate"
+    networks:
+      internal-net:
+        ipv4_address: 172.18.0.6
+        mac_address: "00:1a:2b:0a:66:66"
+      egress-net:
+        ipv4_address: 172.19.0.6
+        mac_address: "00:05:1a:0a:66:66"
+    cpuset: "0"
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    sysctls:
+      <<: *stealth-sysctls
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c 'import socket; s=socket.socket(); s.settimeout(2); s.connect((\"127.0.0.1\", 53)); s.close()' || exit 1"]
+      interval: 5s
+      timeout: 4s
+      retries: 10
+      start_period: 5s
+    <<: *no-logging
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------
+  # POSTGRES: Internal Storage Vault
+  # -------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: db-vault
+    environment:
+      POSTGRES_DB: core_db
+      POSTGRES_USER: engine_user
+      POSTGRES_PASSWORD: "${DB_PASSWD:?ERROR: DB_PASSWD environment variable is not set}"
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      TZ: UTC
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      internal-net:
+        ipv4_address: 172.18.0.2
+    dns:
+      - 172.18.0.6
+    dns_search:
+      - .
+    extra_hosts:
+      - "redis-queue:172.18.0.3"
+      - "doh-proxy:172.18.0.6"
+    mac_address: "00:1a:2b:0a:11:11"
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+    cpuset: "0"
+    pids_limit: 1024
+    sysctls:
+      <<: *stealth-sysctls
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U engine_user -d core_db -h 172.18.0.2"]
+      interval: 5s
+      timeout: 4s
+      retries: 10
+      start_period: 10s
+    <<: *no-logging
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------
+  # REDIS: Volatile Message Broker
+  # -------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: redis-queue
+    command:
+      - redis-server
+      - --requirepass
+      - "${REDIS_PASSWD:?ERROR: REDIS_PASSWD environment variable is not set}"
+      - --bind
+      - "172.18.0.3"
+      - --bind
+      - "127.0.0.1"
+      - --protected-mode
+      - "yes"
+      - --loglevel
+      - "warning"
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      - --rename-command
+      - "CONFIG"
+      - ""
+      - --rename-command
+      - "DEBUG"
+      - ""
+    networks:
+      internal-net:
+        ipv4_address: 172.18.0.3
+    dns:
+      - 172.18.0.6
+    dns_search:
+      - .
+    extra_hosts:
+      - "db-vault:172.18.0.2"
+      - "doh-proxy:172.18.0.6"
+    mac_address: "00:1a:2b:0a:22:22"
+    cap_drop:
+      - ALL
+    cpuset: "0"
+    pids_limit: 1024
+    sysctls:
+      <<: *stealth-sysctls
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=${REDIS_PASSWD} redis-cli -h 172.18.0.3 ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    <<: *no-logging
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------
+  # CLEAN ROOM GATE: CreepJS Validation Oracle
+  # -------------------------------------------------------------------
+  clean-room-gate:
+    image: node:20-alpine
+    container_name: clean-room-gate
+    working_dir: /app
+    environment:
+      TZ: UTC
+    volumes:
+      - ./creepjs-gate:/app:ro
+    command: node server.js
+    networks:
+      internal-net:
+        ipv4_address: 172.18.0.4
+    dns:
+      - 172.18.0.6
+    dns_search:
+      - .
+    extra_hosts:
+      - "db-vault:172.18.0.2"
+      - "doh-proxy:172.18.0.6"
+    mac_address: "00:1a:2b:0a:33:33"
+    cap_drop:
+      - ALL
+    cpuset: "0"
+    pids_limit: 512
+    sysctls:
+      <<: *stealth-sysctls
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://172.18.0.4:3000/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 8s
+    <<: *no-logging
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------
+  # GOST PROXY SIDECAR: Egress SOCKS5 Gateway
+  # v5.0+: SOCKS5_PERSONA_PORTS env var maps persona_uuid -> port.
+  # Each persona gets a unique GOST listener port (1081-1085).
+  # GOST command is set to listen on multiple ports, each pinning a
+  # different upstream exit. The orchestrator selects port by persona
+  # UUID hash. This prevents cross-persona source IP correlation
+  # (forensic subpoena of GOST logs yields different source IPs per
+  # persona).
+  # -------------------------------------------------------------------
+  proxy-sidecar-res:
+    image: ginuerzh/gost:2.11.5
+    container_name: proxy-res
+    environment:
+      TZ: UTC
+    command:
+      # v5.0+: Multi-port SOCKS5 listeners. Each port = distinct upstream
+      # exit. The orchestrator's env var SOCKS5_PERSONA_PORTS specifies
+      # which port maps to which persona UUID. Below uses 5 ports as a
+      # template, but with MAX_CONCURRENT_PERSONAS=1 we only need 1 active.
+      # Gost's -L is repeatable; we use comma-separated.
+      - "-L=socks5://172.18.0.5:1081?notls=true -L=socks5://172.18.0.5:1082?notls=true -L=socks5://172.18.0.5:1083?notls=true -L=socks5://172.18.0.5:1084?notls=true -L=socks5://172.18.0.5:1085?notls=true"
+      - "-F=${UPSTREAM_RES_PROXY:?ERROR: UPSTREAM_RES_PROXY environment variable is not defined. Traffic leak prevention active.}"
+    networks:
+      internal-net:
+        ipv4_address: 172.18.0.5
+        mac_address: "00:1a:2b:0a:44:44"
+      egress-net:
+        ipv4_address: 172.19.0.5
+        mac_address: "00:05:1a:0a:44:44"
+    dns:
+      - 172.18.0.6
+    dns_search:
+      - .
+    extra_hosts:
+      - "doh-proxy:172.18.0.6"
+    depends_on:
+      doh-proxy:
+        condition: service_healthy
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    cpuset: "0"
+    pids_limit: 512
+    sysctls:
+      <<: *stealth-sysctls
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c 'import socket; s=socket.socket(); s.settimeout(2); s.connect((\"172.18.0.5\", 1081)); s.close()' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    <<: *no-logging
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------
+  # ORCHESTRATOR: Target Browser Factory (v5.0+ hardened, 1 persona)
+  # -------------------------------------------------------------------
+  orchestrator:
+    build:
+      context: ./browser-runtime
+      dockerfile: Dockerfile
+    container_name: hardened-orchestrator
+    hostname: "DESKTOP-H3N1J7X"
+    # v6.0+: shm_size reduced for 1 GB E2.1.Micro. Chrome needs less shm
+    # than Chromium.
+    shm_size: '512m'
+    # v6.0+: 90s grace for orchestrator to wipe tmpfs and tc qdisc
+    # before SIGKILL.
+    stop_grace_period: 90s
+    # v6.0.1: tini is now installed in the Dockerfile and invoked as
+    # the ENTRYPOINT. The `init:` field in Docker Compose only accepts
+    # a boolean; the previous `init: ["tini", ...]` syntax was invalid
+    # and silently ignored. We use the Dockerfile's tini directly to get
+    # the --grace-period=90000 (90s) flag.
+    # init: true  # disabled; tini is in the ENTRYPOINT instead
+    # v6.0+: tmpfs sizing for 1 GB E2.1.Micro (total: ~800 MB, leaves 200 MB for OS)
+    # - /tmp 512M
+    # - /mnt/ramdisk 200M (per-task tmpfs of 180M mounted in entrypoint.sh)
+    # - /run 16M
+    # - /var/tmp 64M
+    # All other paths are rootfs read-only.
+    tmpfs:
+      - /tmp:size=512M,noexec,nosuid,nodev
+      - /mnt/ramdisk:size=200M,noexec,nosuid,nodev
+      - /run:size=16M,noexec,nosuid,nodev
+      - /run/lock:size=2M,noexec,nosuid,nodev
+      - /var/tmp:size=64M,noexec,nosuid,nodev
+    # v5.0+: Mock /proc and /sys files. Per-persona stable values.
+    # /etc/mock_cpuinfo and /etc/mock_version are STATIC (no per-persona
+    # data), so they can be shared across the single persona.
+    # /etc/mock_boot_id is BIND-MOUNTED from a file that the orchestrator
+    # rewrites on each persona rotation (6h). The orchestrator generates
+    # a fresh UUID for the new persona.
+    volumes:
+      - /etc/mock_cpuinfo:/proc/cpuinfo:ro
+      - /etc/mock_version:/proc/version:ro
+      - /etc/mock_dmi_id:/sys/class/dmi/id:ro
+      - /etc/mock_boot_id:/proc/sys/kernel/random/boot_id:ro
+      - /etc/mock_osrelease:/proc/sys/kernel/osrelease:ro
+      # Chromium writable paths (tmpfs-backed)
+      - tmp_orch_xdg:/root/.config:rw
+      - tmp_orch_cache:/root/.cache:rw
+    # v5.0+: Random MAC at container start. Compose's mac_address is
+    # static, but for 1 persona the orchestrator's entrypoint.sh can
+    # override this with `ip link set ... address` at boot. We use a
+    # realistic Intel OUI as the static base for predictability.
+    mac_address: "3c:6a:9d:1f:2e:8b"
+    # v5.0+: Run as root (entrypoint.sh needs it for iptables).
+    # entrypoint.sh drops to UID 1000 before exec'ing Python.
+    user: "0:0"
+    environment:
+      - DB_URI=postgresql://engine_user:${DB_PASSWD}@172.18.0.2:5432/core_db
+      - REDIS_URI=redis://:${REDIS_PASSWD}@172.18.0.3:6379/0
+      - RAM_DISK_DIR=/mnt/ramdisk
+      - ENCRYPTION_KEY="${ENCRYPTION_KEY:?ERROR: ENCRYPTION_KEY must be defined}"
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_MODEL=${LLM_MODEL:-llama3}
+      # v5.0+: SOCKS5_PROXY now points to per-persona port.
+      # The orchestrator's SOCKS5_PERSONA_PORTS env maps persona_uuid
+      # -> port. The default orchestrator-side variable points to the
+      # generic SOCKS5 listener; the orchestrator rewrites per persona.
+      - SOCKS5_PROXY=socks5h://172.18.0.5:1081
+      - SOCKS5_PERSONA_PORTS=1081,1082,1083,1084,1085
+      - SOCKS5_REMOTE_DNS=true
+      - HTTP_PROXY=socks5h://172.18.0.5:1081
+      - HTTPS_PROXY=socks5h://172.18.0.5:1081
+      - ALL_PROXY=socks5h://172.18.0.5:1081
+      - NO_PROXY=172.18.0.2,172.18.0.3,172.18.0.4,172.18.0.5,172.18.0.6,172.18.0.0/24,127.0.0.1,localhost
+      - CLOAKBROWSER_PATH=/opt/cloakbrowser/chrome
+      - PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/opt/cloakbrowser/chrome
+      - PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+      - CLOAKBROWSER_REQUIRED=${CLOAKBROWSER_REQUIRED:-true}
+      - NO_AT_BRIDGE=1
+      # v6.0.3: DBUS_SESSION_BUS_ADDRESS removed. entrypoint.sh now manages
+      # the DBus address (default: unix:path=/tmp/dbus-session-bus).
+      # The previous /dev/null value prevented ChromeBrowser from connecting
+      # to the entrypoint's DBus daemon.
+      # v5.0+: 1-persona sizing
+      - MAX_CONCURRENT_PERSONAS=1
+      - MAX_CRYPTO_WORKERS=1
+      - TASK_TIMEOUT_SECONDS=2700
+      # v6.0.3: Explicit timezone (entrypoint.sh sets this too, but compose
+      # env takes precedence. The entrypoint's ${TZ:-default} will use this).
+      - TZ=${PERSONA_TZ:-America/New_York}
+      - PAGE_LOAD_TIMEOUT=30
+      # v5.0+: Sequential-only operation
+      - TASKS_PER_BATCH=1
+      - DAEMON_POLL_INTERVAL=5
+      # v5.0+: Per-persona retirement / rotation / session cap
+      - MAX_TASKS_PER_PERSONA=10
+      - PERSONA_ROTATION_HOURS=6
+      - MAX_SESSION_MINUTES=45
+      # v5.0+: Quiescence / cooldown
+      - PERSONA_QUIESCENCE_BEFORE_TASK_S_MIN=30
+      - PERSONA_QUIESCENCE_BEFORE_TASK_S_MAX=180
+      - POST_TASK_COOLDOWN_S_MIN=300
+      - POST_TASK_COOLDOWN_S_MAX=900
+      # v5.0+: PID budget per persona (single persona, tight)
+      - PERSONA_PID_BUDGET=128
+      # v5.0+: tmpfs panic signal
+      - ORCH_PANIC_SIGNAL=SIGUSR1
+      # v6.0+: Per-persona task tmpfs size (matches container-level
+      # /mnt/ramdisk:200M so we cannot exceed it).
+      - TASK_TMPFS_SIZE_MB=180
+      # v5.0+: Behavioral entropy compositor jitter (real-browser ±1-2ms)
+      - BE_COMPOSITOR_JITTER_MS=1.5
+      # v5.0+: First-navigation-delay (real human opens tab, looks
+      # around 8-25s before clicking target).
+      - FIRST_NAV_DELAY_MIN_S=8
+      - FIRST_NAV_DELAY_MAX_S=25
+      # v5.0+: TLS fingerprint target
+      - UTLS_TARGET_HELLO=HelloChrome_120
+      # v5.0+: gVisor runtime (set in deploy.resources.reservations
+      # below; the runtime is host-level)
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      clean-room-gate:
+        condition: service_healthy
+      proxy-sidecar-res:
+        condition: service_healthy
+      doh-proxy:
+        condition: service_healthy
+    networks:
+      internal-net:
+        ipv4_address: 172.18.0.10
+    dns_search:
+      - .
+    extra_hosts:
+      - "db-vault:172.18.0.2"
+      - "redis-queue:172.18.0.3"
+      - "clean-room-gate:172.18.0.4"
+      - "proxy-res:172.18.0.5"
+      - "doh-proxy:172.18.0.6"
+    # v6.0+: cpuset dedicated to single persona (E2.1.Micro has ~0.125 core).
+    # We use the only available core; no cpuset range possible.
+    cpuset: "${ORCHESTRATOR_CPUSET:-0}"
+    cpus: '0.5'  # Half of 1/8 OCPU = ~0.0625; allow 0.5 for burst
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+      nproc:
+        soft: 8192
+        hard: 8192
+      memlock:
+        soft: -1
+        hard: -1
+      # v5.0+: core dumps disabled (forensic goldmine)
+      core:
+        soft: 0
+        hard: 0
+    # v6.0+: 1-persona memory sizing for x86 E2.1.Micro (1 GB total).
+    # We allocate most of the available memory to the orchestrator.
+    # CloakBrowser + Chrome use ~700 MB; orchestrator Python ~200 MB.
+    mem_limit: 900m
+    mem_reservation: 600m
+    mem_swappiness: 0
+    # v6.0+: Tighter PID limit for 1 GB RAM.
+    pids_limit: 64
+    # v5.0+: read-only rootfs
+    read_only: true
+    security_opt:
+      - "no-new-privileges:true"
+      - "label:disable"
+      # v6.0+: custom seccomp profile (x86_64-only, ~80 syscalls).
+      # Drops perf_event_open, bpf, raw socket, etc. Host-side path
+      # is /etc/docker/seccomp/chromium_stealth.json.
+      - "seccomp=/etc/docker/seccomp/chromium_stealth.json"
+    cap_drop:
+      - ALL
+    # v6.0+: caps for 1-persona on x86 E2.1.Micro.
+    # - NET_ADMIN: iptables OUTPUT/INPUT/NAT/mangle rules in entrypoint.sh
+    # - NET_RAW: iptables extensions (mangle, raw)
+    # - DAC_OVERRIDE: mount --bind for /proc/cpuinfo fallback
+    # - SYS_ADMIN: CloakBrowser may need this for sandbox features
+    # - SYS_PTRACE: CloakBrowser debug features (only in dev builds)
+    # NOTE: On 1 GB E2.1.Micro, we accept slightly broader cap set
+    # in exchange for CloakBrowser compatibility.
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - DAC_OVERRIDE
+      - SYS_ADMIN
+      - SYS_PTRACE
+    # v6.0+: Deploy resources match E2.1.Micro constraints.
+    deploy:
+      resources:
+        limits:
+          memory: 900M
+          cpus: '0.5'
+        reservations:
+          memory: 600M
+          cpus: '0.1'
+    sysctls:
+      # v6.0+: Debian 12 / Linux 6.1.x defaults
+      net.ipv6.conf.all.disable_ipv6: 1
+      net.ipv6.conf.default.disable_ipv6: 1
+      net.ipv6.conf.lo.disable_ipv6: 1
+      net.ipv4.tcp_timestamps: 1
+      net.ipv4.tcp_syncookies: 1
+      net.ipv4.tcp_sack: 1
+      net.ipv4.tcp_dsack: 1
+      net.ipv4.conf.all.accept_redirects: 0
+      net.ipv4.conf.default.accept_redirects: 0
+      net.ipv4.conf.all.send_redirects: 0
+      net.ipv4.conf.default.send_redirects: 0
+      net.ipv4.icmp_echo_ignore_all: 0
+      net.ipv4.ip_default_ttl: 64
+      net.ipv4.tcp_fin_timeout: 60
+      net.ipv4.conf.all.log_martians: 0
+      net.ipv4.conf.all.rp_filter: 1
+      net.ipv4.conf.default.rp_filter: 1
+      net.ipv4.conf.all.accept_source_route: 0
+      net.ipv4.conf.default.accept_source_route: 0
+    apparmor: "unconfined"
+    # v5.0+: restart:no. If the container crashes, the orchestrator's
+    # parent (host-level supervisor) must spin up a NEW container with
+    # a fresh boot_id and tmpfs. Same container restart = same
+    # boot_id = correlation.
+    restart: "no"
+    # v5.0+: gVisor runtime. The host daemon must have runsc installed.
+    # To use gVisor, change to `runtime: runsc` and ensure
+    # /etc/docker/daemon.json has `"runtimes": {"runsc": {"path": "/usr/bin/runsc"}}`.
+    # Comment out the line below if gVisor is not available — falls
+    # back to the default runc runtime.
+    # runtime: "runsc"
+    <<: *no-logging
+
+# =====================================================================
+# v5.0+: Person-isolator sidecar REMOVED. Per-task tmpfs is managed
+# entirely by the orchestrator's entrypoint.sh (pre-mount) and Python
+# orchestrator (mkdir/extract/wipe).
+# =====================================================================
+
+# =====================================================================
+# NETWORK DEFINITIONS
+# =====================================================================
+networks:
+  internal-net:
+    driver: bridge
+    internal: true
+    driver_opts:
+      com.docker.network.bridge.name: br_internal
+      com.docker.network.bridge.enable_icc: "true"
+      com.docker.network.bridge.enable_ip_masquerade: "false"
+      com.docker.network.driver.mtu: "1500"
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.18.0.0/24
+          gateway: 172.18.0.1
+
+  egress-net:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: br_egress
+      com.docker.network.bridge.enable_icc: "true"
+      com.docker.network.bridge.enable_ip_masquerade: "true"
+      com.docker.network.driver.mtu: "1500"
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.19.0.0/24
+          gateway: 172.19.0.1
+
+volumes:
+  # v6.0+: Volume sizes for x86 E2.1.Micro (1 GB total RAM).
+  # Total tmpfs allocation: ~400 MB (leaves ~600 MB for OS + containers).
+  pgdata:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "size=128M,noexec,nosuid,nodev"  # Was 1G; reduced for E2.1.Micro
+  tmp_orch_xdg:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "size=32M,noexec,nosuid,nodev"  # Was 128M; reduced
+  tmp_orch_cache:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "size=64M,noexec,nosuid,nodev"  # Was 256M; reduced

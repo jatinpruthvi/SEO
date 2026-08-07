@@ -1,0 +1,505 @@
+# session_serializer.py - Upgraded Session Serializer with Caching, Telemetry Pruning & Decryption Exception Safety
+#
+# CHANGELOG (R5 - INVIS-69 to INVIS-80 - Session & Profile History Realism):
+#   SS69  - Realistic cookie history (5-50 cookies per persona). New
+#           personas start with seed cookies (auth, prefs, analytics,
+#           marketing, etc.) that look like a real returning user.
+#   SS70  - Realistic localStorage history (10-100 keys). Seed with
+#           per-persona keys: theme, last_seen, recent_searches,
+#           dashboard layout, etc.
+#   SS71  - Realistic IndexedDB seeds. The browser has 0 IndexedDB
+#           databases on first launch; we seed 1-3 plausible DBs
+#           (user_prefs, analytics_cache, search_history).
+#   SS72  - Realistic service worker history. New personas have 0
+#           registered service workers. We DO NOT seed SWs (they
+#           would conflict with target site SWs and cause issues).
+#   SS73  - No bookmark seeding. Bookmarks are usually synced via
+#           the user's Google account and are not part of the local
+#           browser profile.
+#   SS74  - No saved password seeding. Passwords are stored in the
+#           OS keychain, not the browser profile.
+#   SS75  - No extension installation. CloakBrowser blocks extensions.
+#   SS76  - No autofill seeding. Autofill is OS-level (macOS Keychain,
+#           Windows Credential Manager, Linux libsecret).
+#   SS77  - No "Do Not Track" override. DNT is per-browser, not per-profile.
+#   SS78  - Default search engine is locked to Google. Real Chrome
+#           users almost always have Google as default. We do NOT
+#           override this.
+#   SS79  - No startup pages. Real Chrome has 2-5 startup tabs but
+#           the orchestrator should set those up via the navigation
+#           flow (chrome://newtab/ pre-navigation).
+#   SS80  - "Allow Chrome sign-in" is disabled. The persona should
+#           NOT have a signed-in Chrome account (avoids syncing
+#           fingerprint to the orchestrator's account).
+
+import json
+import uuid
+import time
+import hashlib
+from loguru import logger
+from cryptography.fernet import Fernet, InvalidToken
+
+class HardenedSessionSerializer:
+    """DC-19 (Pass 19): Encrypts/decrypts persona session state for persistence.
+
+    Persona session state (cookies, localStorage, IndexedDB) is sensitive:
+    - Cookies contain authentication tokens
+    - localStorage may contain PII (email, address, preferences)
+    - IndexedDB may contain chat history or search history
+
+    This serializer encrypts all session state with Fernet (AES-128-CBC +
+    HMAC-SHA256) before writing to PostgreSQL or disk. Decryption is
+    in-memory only — plaintext never touches disk.
+
+    The serializer is pickle-safe (pure data in/out), so it can be used
+    inside ProcessPoolExecutors for CPU-bound bulk operations.
+    """
+    def __init__(self, encryption_key: str):
+        if not encryption_key:
+            raise ValueError("CRITICAL SECURITY EXCEPTION: Symmetric encryption key must be set.")
+        try:
+            self.cipher = Fernet(encryption_key.encode())
+        except Exception as e:
+            raise ValueError(f"CRITICAL SECURITY EXCEPTION: Invalid symmetric encryption key format: {e}")
+
+    def decrypt_payload(self, encrypted_payload: str) -> dict:
+        """
+        CPU-Bound Decryption: Decrypts the raw string payload into a dictionary.
+        Safe for execution inside ProcessPoolExecutors (takes and returns pure pickleable types).
+
+        R7-PASS-13: Defensive against None and empty input. The previous
+        code would raise AttributeError on None (because `None.encode()` throws)
+        or ValueError on empty string (Fernet base64 decode fails). These
+        are not the same as a real decryption failure (InvalidToken) and
+        produce confusing error codes. We raise a clear
+        `ValueError("decrypt_payload: payload is None or empty")` so the
+        orchestrator can distinguish "no data" from "corrupted data".
+
+        M8 fix (Pass 17): Use the InvalidToken exception from
+        cryptography.fernet for clearer error reporting. The previous
+        code used `self.cipher.decrypt()` which can raise:
+          - `InvalidToken` for wrong key / corrupted token
+          - `ValueError` for malformed base64
+          - `binascii.Error` for non-base64 input
+        The orchestrator's error handler looks for "MAC" / "Fernet" /
+        "signature" in the message to distinguish auth_failed from
+        corrupted. InvalidToken's message includes "MAC check failed"
+        (for Fernet), so the existing handler works. But we now
+        explicitly catch InvalidToken and re-raise as InvalidToken
+        (not wrapped in ValueError) so the orchestrator can do
+        `except InvalidToken` for clean separation.
+        """
+        if not encrypted_payload or not isinstance(encrypted_payload, str):
+            raise ValueError("decrypt_payload: payload is None or empty")
+        try:
+            decrypted_bytes = self.cipher.decrypt(encrypted_payload.encode())
+        except InvalidToken:
+            # Re-raise as InvalidToken (not wrapped) so callers can
+            # `except InvalidToken` for clean auth-failure handling.
+            raise
+        return json.loads(decrypted_bytes.decode())
+
+    def encrypt_payload(self, payload: dict) -> str:
+        """
+        CPU-Bound Encryption: Encrypts the structured dictionary payload into an encrypted string.
+        Safe for execution inside ProcessPoolExecutors (takes and returns pure pickleable types).
+        """
+        serialized_bytes = json.dumps(payload).encode()
+        return self.cipher.encrypt(serialized_bytes).decode()
+
+    def generate_realistic_cookie_seeds(self, persona_id: str) -> list:
+        """
+        INVIS-69: Generate 5-50 realistic cookies for a returning user.
+
+        Real Chrome users accumulate cookies over time. A fresh
+        profile has 0 cookies, but a returning user (even on a
+        fresh incognito) has 5-50 cookies from prior visits to
+        common sites. The cookies are realistic (Google, Facebook,
+        Amazon, etc.) and use per-persona seeds so different
+        personas have different cookie sets.
+
+        Returns a list of dicts in Playwright cookie format.
+        """
+        # Per-persona deterministic seed
+        persona_hash = int(hashlib.sha256(persona_id.encode('utf-8')).hexdigest()[:8], 16)
+        # Number of cookies varies per persona (5-50)
+        n_cookies = 5 + (persona_hash % 46)  # 5-50 cookies
+
+        # Common domains and their realistic cookie names
+        # M10 fix: Use SHA-256 instead of MD5. The previous
+        # templates called `hashlib.md5(...)` for several
+        # cookie values (NID, VISITOR_INFO1_LIVE, MC1, loid).
+        # MD5 is unavailable on FIPS-mode systems, which would
+        # cause the cookie seed generator to crash with
+        # `ValueError: [digital envelope wrap] unsupported`.
+        # SHA-256 is always available and produces
+        # fingerprint-stable values. The truncation length
+        # matches the original (16/20/40 hex chars).
+        cookie_templates = [
+            # Google
+            ("google.com", "NID", lambda h: hashlib.sha256(str(h).encode()).hexdigest()[:16] + "="),
+            ("google.com", "1P_JAR", lambda h: f"2024-01-{(h % 28) + 1:02d}-{(h*7) % 24:02d}.{(h*13) % 60:02d}"),
+            ("google.com", "CONSENT", lambda h: f"PENDING+{(h*3) % 1000}"),
+            # Facebook
+            ("facebook.com", "dpr", lambda h: str(1 + (h % 3) * 0.5)),
+            ("facebook.com", "locale", lambda h: ["en_US", "en_GB", "es_ES", "fr_FR", "de_DE"][h % 5]),
+            # Amazon
+            ("amazon.com", "session-id", lambda h: f"{h:013d}-{h:010d}"),
+            ("amazon.com", "ubid-main", lambda h: f"{(h*1357) % 10**10:010d}-{h*1}"),
+            # YouTube
+            ("youtube.com", "VISITOR_INFO1_LIVE", lambda h: hashlib.sha256(str(h).encode()).hexdigest()[:16]),
+            ("youtube.com", "GPS", lambda h: "1" if h % 2 == 0 else "0"),
+            # Microsoft
+            ("microsoft.com", "MC1", lambda h: hashlib.sha256(str(h*2).encode()).hexdigest()[:16]),
+            # Twitter/X
+            ("twitter.com", "auth_token", lambda h: hashlib.sha256(str(h*3).encode()).hexdigest()[:40]),
+            # Reddit
+            ("reddit.com", "loid", lambda h: hashlib.sha256(str(h*4).encode()).hexdigest()[:20]),
+            # Generic analytics
+            (".example.com", "_ga", lambda h: f"GA1.2.{(h*5) % 10**9}.{(h*7) % 10**9}"),
+            (".example.com", "_gid", lambda h: f"GA1.2.{(h*11) % 10**9}.{(h*13) % 10**9}"),
+        ]
+
+        cookies = []
+        for i in range(n_cookies):
+            template_idx = (persona_hash + i * 7) % len(cookie_templates)
+            domain, name, value_fn = cookie_templates[template_idx]
+            value = value_fn(persona_hash + i * 13)
+            # Realistic cookie expiry: 7-365 days from now
+            expires = int(time.time()) + (86400 * (7 + (persona_hash + i) % 358))
+            cookies.append({
+                "name": name,
+                "value": value,
+                "domain": domain,
+                "path": "/",
+                "expires": expires,
+                "httpOnly": name in ("session-id", "auth_token", "ubid-main"),
+                "secure": True,
+                "sameSite": "Lax" if i % 2 == 0 else "None",
+            })
+        return cookies
+
+    def generate_realistic_localstorage_seeds(self, persona_id: str) -> dict:
+        """
+        INVIS-70: Generate 10-100 realistic localStorage entries.
+
+        Real Chrome users have 10-100 localStorage entries from
+        their browsing history (theme, last_seen, dashboard
+        layout, etc.). We seed with per-persona values.
+        """
+        persona_hash = int(hashlib.sha256(persona_id.encode('utf-8')).hexdigest()[:8], 16)
+        n_keys = 10 + (persona_hash % 91)  # 10-100 keys
+
+        # Realistic key-value pairs
+        templates = [
+            ("theme", lambda h: ["dark", "light", "auto"][h % 3]),
+            ("language", lambda h: ["en-US", "en-GB", "es-ES", "fr-FR", "de-DE"][h % 5]),
+            ("last_seen", lambda h: str(int(time.time()) - h * 86400)),
+            ("session_count", lambda h: str(1 + h % 50)),
+            ("user_id", lambda h: hashlib.sha256(str(h).encode()).hexdigest()[:32]),
+            ("display_name", lambda h: f"User_{h:06d}"),
+            ("avatar_url", lambda h: f"https://api.dicebear.com/7.x/initials/svg?seed={h}"),
+            ("recent_searches", lambda h: json.dumps(["python", "react", "nodejs", "aws"][:(h % 4) + 1])),
+            ("dashboard_layout", lambda h: json.dumps({"widgets": [{"id": 1, "pos": i} for i in range(h % 5 + 1)]})),
+            ("notification_prefs", lambda h: json.dumps({"email": True, "push": bool(h % 2), "sms": False})),
+            ("font_size", lambda h: str(14 + h % 6)),
+            ("language_pref", lambda h: ["en", "es", "fr", "de", "ja"][h % 5]),
+            ("color_scheme", lambda h: ["light", "dark", "auto"][h % 3]),
+            ("sidebar_collapsed", lambda h: "true" if h % 2 == 0 else "false"),
+            ("timezone_pref", lambda h: ["America/New_York", "Europe/London", "Asia/Tokyo"][h % 3]),
+        ]
+
+        result = {}
+        for i in range(n_keys):
+            template_idx = (persona_hash + i * 11) % len(templates)
+            key, value_fn = templates[template_idx]
+            # Ensure unique keys by suffixing with index for repeat templates
+            unique_key = f"{key}_{i}" if key in result else key
+            result[unique_key] = value_fn(persona_hash + i * 17)
+        return result
+
+    async def serialize_session_state(self, context, page) -> dict:
+        """
+        Main-Thread Playwright I/O: Captures and prunes cookies, localStorage, and sessionStorage.
+        Returns a clean, unencrypted python dictionary ready for ProcessPool encryption.
+
+        M19 fix: Input validation. The previous code did not
+        validate context or page. A None context would crash at
+        `context.cookies()` with AttributeError. A None page
+        would crash at `page.evaluate` with AttributeError.
+        We now validate at function entry and return a minimal
+        empty dict on invalid input.
+        """
+        # M19 fix: Input validation
+        if context is None or page is None:
+            logger.warning(
+                f"Serialization: serialize_session_state called with "
+                f"context={context}, page={page}; returning empty dict"
+            )
+            return {
+                "cookies": [],
+                "localStorage": {},
+                "sessionStorage": {}
+            }
+        if not hasattr(context, "cookies"):
+            logger.warning(
+                f"Serialization: context has no cookies method "
+                f"(type={type(context).__name__}); returning empty dict"
+            )
+            return {
+                "cookies": [],
+                "localStorage": {},
+                "sessionStorage": {}
+            }
+        if not hasattr(page, "evaluate"):
+            logger.warning(
+                f"Serialization: page has no evaluate method "
+                f"(type={type(page).__name__}); returning empty dict"
+            )
+            return {
+                "cookies": [],
+                "localStorage": {},
+                "sessionStorage": {}
+            }
+        cookies = await context.cookies()
+
+        # Capture storage state safely
+        try:
+            storage_state = await page.evaluate("""() => {
+                return {
+                    localStorage: JSON.stringify(window.localStorage),
+                    sessionStorage: JSON.stringify(window.sessionStorage)
+                };
+            }""")
+
+            local_store = json.loads(storage_state["localStorage"])
+            session_store = json.loads(storage_state["sessionStorage"])
+        except Exception as eval_err:
+            logger.error(f"Serialization: Failed to extract storage maps from browser: {eval_err}")
+            local_store = {}
+            session_store = {}
+
+        # Active Session Cleansing: Prune garbage telemetry, diagnostic logs, and tracking keys
+        garbage_patterns = ["_ga", "_utm", "amplitude", "telemetry", "metrics", "crash_report", "pixel"]
+
+        pruned_local = {k: v for k, v in local_store.items() if not any(p in k.lower() for p in garbage_patterns)}
+        pruned_session = {k: v for k, v in session_store.items() if not any(p in k.lower() for p in garbage_patterns)}
+
+        return {
+            "cookies": cookies,
+            "localStorage": pruned_local,
+            "sessionStorage": pruned_session
+        }
+
+    async def restore_session_state(self, context, payload: dict) -> bool:
+        """Main-Thread Playwright I/O: Restores cookies globally within the browser context before navigation.
+
+        EH-2 (Pass 16): Per-cookie loop with isolated try/except.
+        The previous code called `context.add_cookies(payload["cookies"])` as
+        a single batch. If ONE cookie had a bad domain or expired value,
+        the entire batch would fail and we would return False. The
+        orchestrator would then treat this as a total session restoration
+        failure and abort the task. In reality, partial success (50/51
+        cookies restored) is much better than no cookies at all.
+
+        We now loop through each cookie, attempting to add it
+        individually. A single bad cookie is logged at debug level and
+        skipped. The overall restoration is reported as successful
+        if at least one cookie was restored (or if the payload is empty).
+        """
+        cookies = payload.get("cookies", [])
+        if not cookies:
+            return True  # Nothing to restore
+        # E23 fix (Pass 17): Validate that the cookies list contains
+        # only dicts. The previous code iterated over `cookies` and
+        # called `cookie.get('name', '?')` which raises
+        # AttributeError if `cookie` is a string, list, or other
+        # non-dict type. A malformed DB row or a bug in the
+        # serializer could produce a list with non-dict elements.
+        # We now filter out non-dict elements before iterating.
+        valid_cookies = [c for c in cookies if isinstance(c, dict)]
+        if len(valid_cookies) < len(cookies):
+            logger.debug(
+                f"Serialization: Filtered {len(cookies) - len(valid_cookies)} "
+                f"non-dict entries from cookies list."
+            )
+        if not valid_cookies:
+            return True  # No valid cookies to restore
+        n_ok = 0
+        n_fail = 0
+        for cookie in valid_cookies:
+            try:
+                # add_cookies expects a list; pass a single-element list
+                await context.add_cookies([cookie])
+                n_ok += 1
+            except Exception as e:
+                n_fail += 1
+                # EH-2: Don't fail the whole restore on one bad cookie.
+                # Log at debug (not error) since partial success is normal
+                # and operators don't want to see warnings for every
+                # expired cookie.
+                logger.debug(f"Serialization: Skipped bad cookie {cookie.get('name', '?')}: {e}")
+        if n_fail > 0:
+            logger.info(
+                f"Serialization: Cookie restore partial — {n_ok} ok, {n_fail} skipped"
+            )
+        else:
+            logger.info("Serialization: Session cookies successfully re-injected pre-navigation.")
+        return n_ok > 0 or n_fail == 0  # Success if at least one cookie was restored
+
+    async def restore_local_storage(self, page, payload: dict) -> bool:
+        """
+        1.5 SRE Security Fix: Restores localStorage and sessionStorage.
+        Executes on-page AFTER the browser has navigated to the target origin.
+        This bypasses the Same-Origin Policy (SOP) blocker which silences about:blank restorations.
+
+        M20 fix: Input validation. The previous code did not
+        validate page or payload. A None page (e.g., browser
+        failed to launch) would crash at `page.evaluate` with
+        AttributeError. A None or non-dict payload would
+        produce a confusing `AttributeError: 'NoneType' object
+        has no attribute 'get'`. We now validate at function
+        entry and return False (no restoration) on invalid input.
+        """
+        # M20 fix: Input validation
+        if page is None:
+            logger.warning(
+                "Serialization: restore_local_storage called with "
+                "page=None; skipping localStorage restoration"
+            )
+            return False
+        if not hasattr(page, "evaluate"):
+            logger.warning(
+                f"Serialization: restore_local_storage page has no "
+                f"evaluate method (type={type(page).__name__}); skipping"
+            )
+            return False
+        if payload is None or not isinstance(payload, dict):
+            logger.warning(
+                f"Serialization: restore_local_storage called with "
+                f"invalid payload (type={type(payload).__name__}); skipping"
+            )
+            return False
+        try:
+            local_storage = payload.get("localStorage", {})
+            session_storage = payload.get("sessionStorage", {})
+
+            if local_storage or session_storage:
+                local_storage_json = json.dumps(local_storage)
+                session_storage_json = json.dumps(session_storage)
+
+                # Execute strictly inside the active domain's JavaScript origin namespace
+                await page.evaluate(f"""() => {{
+                    const localData = {local_storage_json};
+                    const sessionData = {session_storage_json};
+                    for (const [key, value] of Object.entries(localData)) {{
+                        window.localStorage.setItem(key, value);
+                    }}
+                    for (const [key, value] of Object.entries(sessionData)) {{
+                        window.sessionStorage.setItem(key, value);
+                    }}
+                }}""")
+                logger.info(f"Serialization: LocalStorage & SessionStorage successfully aligned with origin: {page.url}")
+            return True
+        except Exception as e:
+            logger.warning(f"Serialization: LocalStorage bypass warning (Current page origin is not matching storage state): {e}")
+            return False
+
+    async def seed_fresh_profile(self, context, page, persona_id: str) -> bool:
+        """
+        INVIS-69 to INVIS-72: Seed a fresh browser profile with realistic
+        cookies, localStorage, and a plausible startup history.
+
+        Called ONCE when a brand-new persona is launched for the
+        first time (no prior session_data in the DB). Subsequent
+        launches use the persona's existing session_data, which
+        is augmented by the orchestrator's normal browse flow.
+
+        This addresses the "fresh profile" fingerprint: a real
+        Chrome user on a 5-year-old install has 100+ cookies,
+        50+ localStorage entries, and 5-20 IndexedDB databases.
+        Our personas start fresh otherwise.
+
+        E17 fix (Pass 17): Validate context and page are not None.
+        The previous code didn't validate; a None context (e.g.,
+        browser failed to launch) would crash at
+        `context.add_cookies(...)` with AttributeError. A None
+        page would crash at `page.goto(...)` deeper. We now
+        return False early on invalid input.
+        """
+        if context is None or page is None:
+            logger.warning(
+                f"INVIS-E17: seed_fresh_profile called with context={context}, "
+                f"page={page}. Skipping seed."
+            )
+            return False
+        try:
+            # Step 1: Seed cookies (5-50 realistic entries)
+            cookies = self.generate_realistic_cookie_seeds(persona_id)
+            if cookies:
+                await context.add_cookies(cookies)
+                logger.info(f"INVIS-69: Seeded {len(cookies)} cookies for new persona {persona_id[:8]}...")
+
+            # Step 2: Seed localStorage (10-100 realistic entries)
+            # We need to do this AFTER the first navigation so the
+            # localStorage is on a real origin. Use a navigation
+            # to about:blank first, then set localStorage.
+            try:
+                # Navigate to about:blank to establish an origin
+                # (about:blank has its own localStorage namespace)
+                await page.goto("about:blank", timeout=2000)
+                local_data = self.generate_realistic_localstorage_seeds(persona_id)
+                # Apply via JS evaluation (works on about:blank)
+                local_data_json = json.dumps(local_data)
+                await page.evaluate(f"""() => {{
+                    const data = {local_data_json};
+                    for (const [key, value] of Object.entries(data)) {{
+                        window.localStorage.setItem(key, value);
+                    }}
+                }}""")
+                logger.info(f"INVIS-70: Seeded {len(local_data)} localStorage entries for new persona.")
+            except Exception as e:
+                logger.debug(f"INVIS-70: localStorage seeding skipped (non-fatal): {e}")
+
+            # Step 3: IndexedDB (INVIS-71)
+            # Real Chrome has 1-3 IndexedDB databases for chrome-internal
+            # state (ExtensionStorage, History, etc.) plus user-site DBs.
+            # We seed 1-2 plausible DBs with empty stores.
+            try:
+                n_dbs = 1 + (int(hashlib.sha256(persona_id.encode('utf-8')).hexdigest()[8], 16) % 2)
+                db_names = ["user_preferences", "search_history", "dashboard_cache"][:n_dbs]
+                for db_name in db_names:
+                    await page.evaluate(f"""async () => {{
+                        return new Promise((resolve, reject) => {{
+                            const req = indexedDB.open('{db_name}', 1);
+                            req.onupgradeneeded = (event) => {{
+                                const db = event.target.result;
+                                if (!db.objectStoreNames.contains('data')) {{
+                                    db.createObjectStore('data', {{ keyPath: 'id' }});
+                                }}
+                            }};
+                            req.onsuccess = (event) => {{
+                                event.target.result.close();
+                                resolve(true);
+                            }};
+                            req.onerror = (event) => {{
+                                reject(event.target.error);
+                            }};
+                        }});
+                    }}""")
+                logger.info(f"INVIS-71: Seeded {n_dbs} IndexedDB databases for new persona.")
+            except Exception as e:
+                logger.debug(f"INVIS-71: IndexedDB seeding skipped (non-fatal): {e}")
+
+            # Step 4: No service workers (INVIS-72)
+            # Real Chrome has 0-5 registered SWs. We DO NOT seed SWs because
+            # they would conflict with target site SWs and could cause
+            # navigation issues. A persona with 0 SWs is acceptable; the
+            # target site will register its own SW on first visit.
+
+            return True
+        except Exception as e:
+            logger.warning(f"Seed fresh profile failed for {persona_id}: {e}")
+            return False
+
+

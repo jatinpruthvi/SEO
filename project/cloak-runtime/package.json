@@ -1,0 +1,39 @@
+{
+  "name": "cloak-runtime",
+  "version": "0.1.0",
+  "description": "Manifest-driven anti-fingerprinting browser runtime. Loads hardened personas with a one-line API call.",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "scripts": {
+    "test": "node test/selftest.js",
+    "build": "node scripts/build.js"
+  },
+  "keywords": [
+    "anti-fingerprinting",
+    "stealth",
+    "playwright",
+    "puppeteer",
+    "browser",
+    "persona",
+    "cloak",
+    "evasion"
+  ],
+  "author": "CloakBrowser Project",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "playwright": "^1.40.0"
+  },
+  "devDependencies": {},
+  "peerDependencies": {
+    "playwright": "^1.40.0"
+  },
+  "files": [
+    "src/",
+    "manifests/",
+    "README.md",
+    "LICENSE"
+  ]
+}

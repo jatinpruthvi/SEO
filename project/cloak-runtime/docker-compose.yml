@@ -1,0 +1,29 @@
+# docker-compose.yml - cloak-runtime with VNC
+#
+# Usage:
+#   docker-compose up -d              # Start in background
+#   docker-compose logs -f            # Watch logs
+#   docker-compose exec cloak /bin/bash  # Shell into container
+#   docker-compose down               # Stop
+
+version: '3.8'
+
+services:
+  cloak:
+    build: .
+    container_name: cloak-runtime
+    ports:
+      - "5900:5900"    # VNC
+      - "6080:6080"    # noVNC (browser-accessible VNC)
+    environment:
+      - RESOLUTION=1920x1080x24
+      - DEMO=0           # Set to 1 to auto-run demo.js on start
+      - INTERACTIVE=0    # Set to 1 to auto-launch Chromium
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix  # X11 socket sharing
+      - cloak-data:/root/.cloak       # Persistent persona data
+    shm_size: '2gb'        # Chromium needs lots of shared memory
+    restart: unless-stopped
+
+volumes:
+  cloak-data:

@@ -1,0 +1,466 @@
+# Dockerfile.production - Production-grade deployment
+#
+# Strategy: USE cloakhq/cloakbrowser as base, ADD cloak-runtime on top.
+# Don't reinvent the Chromium build.
+#
+# Base image: cloakhq/cloakbrowser (583MB) provides:
+#   - Pre-built stealth Chromium with 26 C++ patches
+#   - Python wrapper (cloakbrowser.launch)
+#   - JS wrapper (npx cloakbrowser)
+#   - Xvfb on :99
+#   - cloaktest / cloakserve CLIs
+#
+# This image ADDS:
+#   - cloak-runtime npm package (your 465 JS patches)
+#   - anti_detect_signature.js (nondeterministic toString)
+#   - VNC + noVNC for GUI access
+#   - Demo runner that uses both layers
+#   - Proxy helper scripts
+#
+# Build:    docker build -f Dockerfile.production -t cloak-prod .
+# Run:      docker-compose -f docker-compose.production.yml up -d
+# Access:   http://localhost:6080/vnc.html (browser VNC)
+#           OR localhost:5900 (VNC client)
+#           OR localhost:9222 (CDP - connect with Playwright)
+
+FROM cloakhq/cloakbrowser:latest
+
+LABEL maintainer="CloakBrowser Project"
+LABEL description="CloakBrowser (C++ patches) + cloak-runtime (JS patches) + VNC GUI. Production-grade anti-fingerprinting."
+
+# ============================================================
+# 1. Add VNC + noVNC for GUI access
+# (Xvfb is already in the base image)
+# ============================================================
+USER root
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        x11vnc \
+        fluxbox \
+        scrot \
+        xterm \
+        tini \
+        jq \
+        curl \
+        xvfb \
+        # FIX #12: xdpyinfo is used by entrypoint to detect if Xvfb
+        # is already running on :99 (which happens if base image
+        # had a pre-running X server).
+        x11-utils \
+    && rm -rf /var/lib/apt/lists/* \
+    || (echo "apt-get install failed; aborting build" && exit 1)
+
+# FIX #42: The previous `&&` chain silently succeeded even if some
+# packages were missing. Now we `set -e` implicitly via the explicit
+# `|| exit 1` so the build fails loudly.
+
+# noVNC for browser-based VNC access
+ENV NOVNC_VERSION=1.4.0
+RUN cd /opt && \
+    wget -q https://github.com/novnc/noVNC/archive/v${NOVNC_VERSION}.tar.gz && \
+    tar xzf v${NOVNC_VERSION}.tar.gz && \
+    rm v${NOVNC_VERSION}.tar.gz && \
+    mv noVNC-${NOVNC_VERSION} novnc && \
+    chmod +x /opt/novnc/utils/launch.sh
+
+# websockify (Python) - bridges WebSocket to VNC
+# FIX #21: Try multiple installation strategies for portability
+# across pip versions (old Debian, new Debian, PEP 668).
+RUN pip3 install --no-cache-dir --break-system-packages websockify 2>/dev/null \
+ || pip3 install --no-cache-dir websockify 2>/dev/null \
+ || (echo "WARNING: websockify install failed, noVNC may not work" && exit 0)
+
+# FIX #24: Verify cloakserve is available; if not, install the
+# cloakbrowser npm wrapper as a fallback for the CDP server mode.
+RUN which cloakserve >/dev/null 2>&1 || ( \
+    echo "cloakserve not found in base image, installing cloakbrowser npm" && \
+    npm install -g cloakbrowser 2>&1 | tail -3 \
+)
+
+# ============================================================
+# 2. VNC password setup
+# ============================================================
+RUN mkdir -p /root/.vnc && \
+    x11vnc -storepasswd cloak /root/.vnc/passwd
+
+# ============================================================
+# 3. Install cloak-runtime (your JS patches)
+# ============================================================
+WORKDIR /opt/cloak-runtime
+
+# Copy package files first for Docker layer caching
+COPY package.json ./
+COPY src/ ./src/
+COPY manifests/ ./manifests/
+COPY scripts/ ./scripts/
+
+# anti_detect_signature.js is already copied by the `COPY src/ ./src/` above
+# (It lives in src/ alongside the other JS files)
+
+# Install dependencies
+# FIX #37: demo.js requires 'cloakbrowser' which is in the base image
+# via npm or via the Python wrapper. Add it to local node_modules so
+# `require('cloakbrowser')` works inside the container.
+RUN npm install --omit=dev --no-audit --no-fund \
+ && npm install --no-save cloakbrowser 2>&1 | tail -3 || true
+
+# Build dist/ from manifests
+RUN node scripts/build.js
+
+# ============================================================
+# 4. Demo runner - exercises the full stack
+# ============================================================
+RUN cat > /opt/cloak-runtime/demo.py << 'PYEOF'
+#!/usr/bin/env python3
+"""demo.py - End-to-end: CloakBrowser C++ + cloak-runtime JS + CreepJS.
+
+Proves the full stack works by visiting abrahamjuliot.github.io/creepjs
+and printing the fingerprint result.
+"""
+import asyncio
+import json
+import os
+import sys
+from pathlib import Path
+
+from cloakbrowser import launch as cloak_launch
+
+
+async def main():
+    persona = os.environ.get("PERSONA", "chrome-128-win")
+    proxy = os.environ.get("HTTP_PROXY") or os.environ.get("HTTPS_PROXY")
+    print(f"[demo] CloakBrowser + cloak-runtime")
+    print(f"[demo] persona={persona} proxy={proxy or 'none'}")
+
+    # Step 1: Launch CloakBrowser (gets 26 C++ patches automatically)
+    browser = await cloak_launch(
+        headless=os.environ.get("HEADLESS", "1") == "1",
+        proxy=proxy,
+    )
+
+    try:
+        context = await browser.new_context(
+            viewport={"width": 1920, "height": 1080},
+        )
+
+        # Step 2: Add cloak-runtime JS patches on top
+        runtime_path = Path(f"/opt/cloak-runtime/dist/{persona}.js")
+        if runtime_path.exists():
+            runtime = runtime_path.read_text()
+            await context.add_init_script(content=runtime)
+            print(f"[demo] Loaded {len(runtime)} bytes of JS patches from {persona}")
+        else:
+            print(f"WARNING: {runtime_path} not found")
+
+        # Step 3: Add anti_detect_signature.js (nondeterministic toString)
+        sig_path = Path("/opt/cloak-runtime/src/anti_detect_signature.js")
+        if sig_path.exists():
+            await context.add_init_script(content=sig_path.read_text())
+            print(f"[demo] Loaded anti_detect_signature.js")
+
+        page = await context.new_page()
+
+        # Step 4: Visit CreepJS
+        print("[demo] Navigating to CreepJS...")
+        try:
+            # FIX #22: Increased timeout. CreepJS loads 50+ WASM modules
+            # and runs many async tests; on residential proxies with
+            # 200ms+ latency, 60s is not enough.
+            await page.goto(
+                "https://abrahamjuliot.github.io/creepjs/",
+                wait_until="networkidle",
+                timeout=120000,
+            )
+            # CreepJS takes 15-30s to complete all checks
+            await page.wait_for_timeout(30000)
+
+            result = await page.evaluate("""() => ({
+                userAgent: navigator.userAgent,
+                webdriver: navigator.webdriver,
+                platform: navigator.platform,
+                hardwareConcurrency: navigator.hardwareConcurrency,
+                deviceMemory: navigator.deviceMemory,
+                languages: navigator.languages,
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                screenWidth: screen.width,
+                screenHeight: screen.height,
+                colorDepth: screen.colorDepth,
+                pixelDepth: screen.pixelDepth,
+                cloak_salt: window.__cloak_signature_salt__,
+                cloak_session: window.__cloak_session_id__,
+                cloak_runtime: window.__cloak_runtime__?.name,
+                patchCount: window.__cloak_runtime__?.patchCount,
+            })""")
+
+            print("\n" + "=" * 60)
+            print("  FINGERPRINT REPORT")
+            print("=" * 60)
+            print(json.dumps(result, indent=2))
+            print("=" * 60)
+
+            # Save for later analysis
+            out_path = Path("/data/last_creepjs.json")
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(json.dumps(result, indent=2))
+            print(f"\n[demo] Saved to {out_path}")
+        except Exception as e:
+            print(f"[demo] CreepJS visit failed: {e}")
+            import traceback
+            traceback.print_exc()
+    finally:
+        await browser.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+PYEOF
+
+# Also create a JS demo (for users who prefer the JS wrapper)
+RUN cat > /opt/cloak-runtime/demo.js << 'JSEOF'
+// demo.js - JS version using the cloakbrowser npm wrapper
+const { cloak } = require('cloakbrowser');
+const fs = require('fs');
+const path = require('path');
+
+async function main() {
+    const persona = process.env.PERSONA || 'chrome-128-win';
+    const proxy = process.env.HTTP_PROXY || process.env.HTTPS_PROXY;
+
+    console.log(`[demo-js] CloakBrowser + cloak-runtime`);
+    console.log(`[demo-js] persona=${persona} proxy=${proxy || 'none'}`);
+
+    // Step 1: Launch CloakBrowser
+    const browser = await cloak.launch({
+        headless: process.env.HEADLESS !== '0',
+        proxy: proxy,
+    });
+
+    try {
+        const context = await browser.newContext({
+            viewport: { width: 1920, height: 1080 },
+        });
+
+        // Step 2: Add cloak-runtime JS patches
+        const runtimePath = path.join('/opt/cloak-runtime/dist', `${persona}.js`);
+        if (fs.existsSync(runtimePath)) {
+            const runtime = fs.readFileSync(runtimePath, 'utf8');
+            await context.addInitScript({ content: runtime });
+            console.log(`[demo-js] Loaded ${runtime.length} bytes of JS patches`);
+        }
+
+        // Step 3: Add anti_detect_signature.js
+        const sigPath = '/opt/cloak-runtime/src/anti_detect_signature.js';
+        if (fs.existsSync(sigPath)) {
+            const sig = fs.readFileSync(sigPath, 'utf8');
+            await context.addInitScript({ content: sig });
+            console.log(`[demo-js] Loaded anti_detect_signature.js`);
+        }
+
+        const page = await context.newPage();
+        console.log('[demo-js] Navigating to CreepJS...');
+
+        try {
+            await page.goto('https://abrahamjuliot.github.io/creepjs/', {
+                waitUntil: 'networkidle',
+                timeout: 60000,
+            });
+            await page.waitForTimeout(15000);
+
+            const result = await page.evaluate(() => ({
+                userAgent: navigator.userAgent,
+                webdriver: navigator.webdriver,
+                platform: navigator.platform,
+                hardwareConcurrency: navigator.hardwareConcurrency,
+                deviceMemory: navigator.deviceMemory,
+                languages: navigator.languages,
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                screenWidth: screen.width,
+                screenHeight: screen.height,
+                colorDepth: screen.colorDepth,
+                cloak_salt: window.__cloak_signature_salt__,
+                cloak_session: window.__cloak_session_id__,
+                cloak_runtime: window.__cloak_runtime__?.name,
+                patchCount: window.__cloak_runtime__?.patchCount,
+            }));
+
+            console.log('\n' + '='.repeat(60));
+            console.log('  FINGERPRINT REPORT (JS)');
+            console.log('='.repeat(60));
+            console.log(JSON.stringify(result, null, 2));
+
+            // Save
+            fs.mkdirSync('/data', { recursive: true });
+            fs.writeFileSync('/data/last_creepjs.json', JSON.stringify(result, null, 2));
+        } catch (e) {
+            console.error(`[demo-js] CreepJS visit failed: ${e.message}`);
+        }
+    } finally {
+        await browser.close();
+    }
+}
+
+main().catch(e => {
+    console.error('Fatal:', e);
+    process.exit(1);
+});
+JSEOF
+
+# Make demos executable
+RUN chmod +x /opt/cloak-runtime/demo.py
+
+# ============================================================
+# 5. Entrypoint - starts Xvfb (already in base), VNC, noVNC, then app
+# ============================================================
+RUN cat > /opt/cloak-runtime/entrypoint.sh << 'BASHEOF'
+#!/bin/bash
+# entrypoint.sh - VNC + noVNC + (demo | cloakserve | custom app)
+#
+# Modes (set via env):
+#   DEMO=1          - Run python demo.py (visits CreepJS)
+#   DEMO_JS=1       - Run node demo.js (JS version)
+#   INTERACTIVE=1   - Launch Chromium in VNC window (manual exploration)
+#   CDP=1           - Start cloakserve (CDP server on 9222)
+#   default         - Keep VNC running, no auto-action
+
+set -e
+
+export RESOLUTION=${RESOLUTION:-1920x1080x24}
+export VNC_PASSWORD=${VNC_PASSWORD:-cloak}
+export VNC_PORT=${VNC_PORT:-5900}
+export NOVNC_PORT=${NOVNC_PORT:-6080}
+
+export DISPLAY=${DISPLAY:-:99}
+
+# Re-set VNC password if changed
+if [ "$VNC_PASSWORD" != "cloak" ]; then
+    x11vnc -storepasswd "$VNC_PASSWORD" /root/.vnc/passwd
+fi
+
+# FIX #12: Start Xvfb ourselves. The base image's Xvfb may not
+# be running because we replaced its entrypoint. If something
+# is already on :99, the new Xvfb will fail to bind — we check
+# first and skip in that case.
+if ! xdpyinfo -display $DISPLAY >/dev/null 2>&1; then
+    echo "[cloak-prod] Starting Xvfb on $DISPLAY at $RESOLUTION..."
+    Xvfb $DISPLAY -screen 0 $RESOLUTION -ac &
+    XVFB_PID=$!
+    # Wait for Xvfb to be ready (up to 5s)
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        if xdpyinfo -display $DISPLAY >/dev/null 2>&1; then
+            echo "[cloak-prod] Xvfb ready after ${i}*500ms"
+            break
+        fi
+        sleep 0.5
+    done
+else
+    echo "[cloak-prod] Xvfb already running on $DISPLAY"
+fi
+
+echo "[cloak-prod] Starting Fluxbox (window manager)..."
+fluxbox &
+sleep 1
+
+echo "[cloak-prod] Starting x11vnc on port $VNC_PORT..."
+x11vnc -display $DISPLAY \
+       -forever \
+       -shared \
+       -rfbport $VNC_PORT \
+       -rfbauth /root/.vnc/passwd \
+       -bg \
+       -o /var/log/x11vnc.log
+sleep 1
+
+echo "[cloak-prod] Starting noVNC on port $NOVNC_PORT..."
+/opt/novnc/utils/launch.sh \
+    --listen $NOVNC_PORT \
+    --vnc localhost:$VNC_PORT \
+    --web /opt/novnc &
+sleep 2
+
+echo ""
+echo "============================================="
+echo "  cloak-prod is running!"
+echo "  VNC:     localhost:$VNC_PORT  (password: $VNC_PASSWORD)"
+echo "  noVNC:   http://localhost:$NOVNC_PORT/vnc.html"
+echo "============================================="
+echo ""
+
+# Mode dispatch
+if [ "${CDP:-0}" = "1" ]; then
+    echo "[cloak-prod] CDP=1, starting cloakserve on 9222..."
+    # Forward any proxy args
+    EXTRA_ARGS=""
+    if [ -n "$HTTP_PROXY" ]; then
+        EXTRA_ARGS="$EXTRA_ARGS --proxy-server=$HTTP_PROXY"
+    fi
+    if [ "${HEADLESS:-0}" != "1" ]; then
+        EXTRA_ARGS="$EXTRA_ARGS --headless=false"
+    fi
+    exec cloakserve $EXTRA_ARGS
+
+elif [ "${DEMO:-0}" = "1" ]; then
+    echo "[cloak-prod] DEMO=1, running demo.py..."
+    cd /opt/cloak-runtime
+    exec python3 demo.py
+
+elif [ "${DEMO_JS:-0}" = "1" ]; then
+    echo "[cloak-prod] DEMO_JS=1, running demo.js..."
+    cd /opt/cloak-runtime
+    exec node demo.js
+
+elif [ "${INTERACTIVE:-0}" = "1" ]; then
+    echo "[cloak-prod] INTERACTIVE=1, launching Chromium in VNC..."
+    exec chromium \
+        --no-sandbox \
+        --disable-dev-shm-usage \
+        --window-size=1920,1080 \
+        "https://abrahamjuliot.github.io/creepjs/"
+
+else
+    # Default: keep VNC alive, run user's main.py if mounted at /app/main.py
+    if [ -f /app/main.py ]; then
+        echo "[cloak-prod] Running /app/main.py..."
+        cd /app
+        exec python3 main.py
+    else
+        echo "[cloak-prod] No mode set and no /app/main.py."
+        echo "  Set DEMO=1, DEMO_JS=1, INTERACTIVE=1, or CDP=1"
+        echo "  Or mount your script: -v ./main.py:/app/main.py"
+        echo ""
+        echo "  Available examples in /opt/cloak-runtime/:"
+        ls -la /opt/cloak-runtime/demo.* 2>/dev/null
+        echo ""
+        # Keep container alive
+        while true; do sleep 3600; done
+    fi
+fi
+BASHEOF
+RUN chmod +x /opt/cloak-runtime/entrypoint.sh
+
+# ============================================================
+# 6. Persistent volume + final env
+# ============================================================
+VOLUME ["/data"]
+
+ENV RESOLUTION=1920x1080x24 \
+    VNC_PASSWORD=cloak \
+    VNC_PORT=5900 \
+    NOVNC_PORT=6080 \
+    DISPLAY=:99 \
+    CLOAKBROWSER_NO_SANDBOX=true \
+    PYTHONUNBUFFERED=1 \
+    PERSONA=chrome-128-win
+
+# Expose all relevant ports
+EXPOSE 5900 6080 9222
+
+# Healthcheck - verify noVNC is responding
+# FIX #48: Use bash -c to call curl explicitly (the base image's
+# `curl` may live at a non-standard path; using `which` finds it).
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD bash -c "curl -sf http://localhost:${NOVNC_PORT}/ > /dev/null" || exit 1
+
+# tini for proper signal handling
+ENTRYPOINT ["/usr/bin/tini", "--"]
+
+CMD ["/opt/cloak-runtime/entrypoint.sh"]

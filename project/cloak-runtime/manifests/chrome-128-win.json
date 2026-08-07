@@ -1,0 +1,4159 @@
+{
+  "name": "chrome-128-win",
+  "version": "0.1.0",
+  "description": "Canonical Chrome 128 on Windows 10 persona. Top-200 deduplicated patches covering navigator, screen, canvas, WebGL, audio, fonts, plugins, and bot detection vectors.",
+  "persona": {
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+    "platform": "Win32",
+    "vendor": "Google Inc.",
+    "language": "en-US",
+    "languages": [
+      "en-US",
+      "en"
+    ],
+    "timezone": "America/New_York",
+    "screen": {
+      "width": 1920,
+      "height": 1080,
+      "colorDepth": 24,
+      "pixelDepth": 24
+    },
+    "hardwareConcurrency": 8,
+    "deviceMemory": 8,
+    "maxTouchPoints": 0
+  },
+  "patches": [
+    {
+      "target": "navigator.webdriver",
+      "kind": "value",
+      "value": false
+    },
+    {
+      "target": "navigator.languages",
+      "kind": "value",
+      "value": [
+        "en-US",
+        "en"
+      ]
+    },
+    {
+      "target": "navigator.language",
+      "kind": "value",
+      "value": "en-US"
+    },
+    {
+      "target": "navigator.platform",
+      "kind": "value",
+      "value": "Win32"
+    },
+    {
+      "target": "navigator.vendor",
+      "kind": "value",
+      "value": "Google Inc."
+    },
+    {
+      "target": "navigator.hardwareConcurrency",
+      "kind": "value",
+      "value": 8
+    },
+    {
+      "target": "navigator.deviceMemory",
+      "kind": "value",
+      "value": 8
+    },
+    {
+      "target": "navigator.maxTouchPoints",
+      "kind": "value",
+      "value": 0
+    },
+    {
+      "target": "navigator.plugins.length",
+      "kind": "value",
+      "value": 5
+    },
+    {
+      "target": "navigator.pdfViewerEnabled",
+      "kind": "value",
+      "value": true
+    },
+    {
+      "target": "navigator.cookieEnabled",
+      "kind": "value",
+      "value": true
+    },
+    {
+      "target": "navigator.doNotTrack",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "navigator.webdriver",
+      "kind": "native_register"
+    },
+    {
+      "target": "window.chrome",
+      "kind": "getter",
+      "getter": "return { runtime: { OnInstalledReason: { CHROME_UPDATE: 'chrome_update', SHARED_MODULE_UPDATE: 'shared_module_update', ON_INSTALL: 'install' }, OnRestartRequiredReason: { APP_UPDATE: 'app_update', OS_UPDATE: 'os_update', PERIODIC: 'periodic' }, PlatformArch: { ARM: 'arm', X86_32: 'x86-32', X86_64: 'x86-64' }, PlatformNaclArch: { ARM: 'arm', X86_32: 'x86-32', X86_64: 'x86-64' }, PlatformOs: { ANDROID: 'android', CROS: 'cros', LINUX: 'linux', MAC: 'mac', OPENBSD: 'openbsd', WIN: 'win' }, RequestUpdateCheckStatus: { NO_UPDATE: 'no_update', THROTTLED: 'throttled', UPDATE_AVAILABLE: 'update_available' } }, app: { isInstalled: false, InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' }, RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' } }, csi: function() { return { pageT: Date.now() - performance.timing.navigationStart, startE: performance.timing.navigationStart, tran: 15 }; }, loadTimes: function() { const _t = performance.timing; return { requestTime: _t.navigationStart / 1000, startLoadTime: _t.navigationStart / 1000, commitLoadTime: (_t.responseStart - _t.navigationStart) / 1000, finishDocumentLoadTime: (_t.domContentLoadedEventEnd - _t.navigationStart) / 1000, finishLoadTime: (_t.loadEventEnd - _t.navigationStart) / 1000, firstPaintTime: (_t.responseStart - _t.navigationStart) / 1000, firstPaintAfterLoadTime: 0, navigationType: 'Other', wasFetchedViaSpdy: false, wasNpnNegotiated: true, npnNegotiatedProtocol: 'h2', wasAlternateProtocolAvailable: false, connectionInfo: 'h2' }; } };"
+    },
+    {
+      "target": "window.chrome.runtime",
+      "kind": "native_register"
+    },
+    {
+      "target": "window.chrome.csi",
+      "kind": "native_register"
+    },
+    {
+      "target": "window.chrome.loadTimes",
+      "kind": "native_register"
+    },
+    {
+      "target": "screen.width",
+      "kind": "value",
+      "value": 1920
+    },
+    {
+      "target": "screen.height",
+      "kind": "value",
+      "value": 1080
+    },
+    {
+      "target": "screen.availWidth",
+      "kind": "value",
+      "value": 1920
+    },
+    {
+      "target": "screen.availHeight",
+      "kind": "value",
+      "value": 1040
+    },
+    {
+      "target": "screen.colorDepth",
+      "kind": "value",
+      "value": 24
+    },
+    {
+      "target": "screen.pixelDepth",
+      "kind": "value",
+      "value": 24
+    },
+    {
+      "target": "screen.orientation.type",
+      "kind": "value",
+      "value": "landscape-primary"
+    },
+    {
+      "target": "innerWidth",
+      "kind": "value",
+      "value": 1920
+    },
+    {
+      "target": "innerHeight",
+      "kind": "value",
+      "value": 969
+    },
+    {
+      "target": "outerWidth",
+      "kind": "value",
+      "value": 1920
+    },
+    {
+      "target": "outerHeight",
+      "kind": "value",
+      "value": 1040
+    },
+    {
+      "target": "devicePixelRatio",
+      "kind": "value",
+      "value": 1
+    },
+    {
+      "target": "Intl.DateTimeFormat.prototype.resolvedOptions",
+      "kind": "function",
+      "implementation": "const _opts = _orig_29.call(this); const _tz = (typeof window !== 'undefined' && window.__cloak_persona_tz) || _opts.timeZone; return Object.assign({}, _opts, { timeZone: _tz });"
+    },
+    {
+      "target": "Date.prototype.getTimezoneOffset",
+      "kind": "function",
+      "implementation": "const _tz = (typeof window !== 'undefined' && window.__cloak_persona_tz) || 'America/New_York'; const _offsets = { 'America/New_York': 240, 'America/Chicago': 360, 'America/Denver': 420, 'America/Los_Angeles': 480, 'America/Austin': 360, 'Europe/London': 0, 'Europe/Paris': -60, 'Europe/Berlin': -60, 'Asia/Tokyo': -540, 'Asia/Kolkata': -330, 'Asia/Shanghai': -480, 'Australia/Sydney': -660, 'UTC': 0, 'GMT': 0 }; return _offsets[_tz] !== undefined ? _offsets[_tz] : 240;"
+    },
+    {
+      "target": "Date.now",
+      "kind": "native_register"
+    },
+    {
+      "target": "HTMLCanvasElement.prototype.toDataURL",
+      "kind": "function",
+      "implementation": "return _orig_32.apply(this, arguments);"
+    },
+    {
+      "target": "HTMLCanvasElement.prototype.toBlob",
+      "kind": "function",
+      "implementation": "return _orig_33.apply(this, arguments);"
+    },
+    {
+      "target": "CanvasRenderingContext2D.prototype.getImageData",
+      "kind": "function",
+      "implementation": "const d = _orig_34.apply(this, arguments); return d;"
+    },
+    {
+      "target": "OffscreenCanvas.prototype.getContext",
+      "kind": "function",
+      "implementation": "return _orig_35.apply(this, arguments);"
+    },
+    {
+      "target": "OffscreenCanvas.prototype.convertToBlob",
+      "kind": "function",
+      "implementation": "return _orig_36.apply(this, arguments);"
+    },
+    {
+      "target": "Path2D.prototype.addPath",
+      "kind": "native_register"
+    },
+    {
+      "target": "WebGLRenderingContext.prototype.getParameter",
+      "kind": "native_register"
+    },
+    {
+      "target": "WebGLRenderingContext.prototype.getExtension",
+      "kind": "native_register"
+    },
+    {
+      "target": "WebGLRenderingContext.prototype.getSupportedExtensions",
+      "kind": "native_register"
+    },
+    {
+      "target": "WebGLRenderingContext.prototype.getShaderPrecisionFormat",
+      "kind": "native_register"
+    },
+    {
+      "target": "WebGLRenderingContext.prototype.getContextAttributes",
+      "kind": "native_register"
+    },
+    {
+      "target": "WebGLRenderingContext.prototype.canvas",
+      "kind": "native_register"
+    },
+    {
+      "target": "WebGL2RenderingContext.prototype.getParameter",
+      "kind": "native_register"
+    },
+    {
+      "target": "WebGL2RenderingContext.prototype.getExtension",
+      "kind": "native_register"
+    },
+    {
+      "target": "WebGLRenderingContext.prototype.readPixels",
+      "kind": "native_register"
+    },
+    {
+      "target": "WebGLRenderingContext.prototype.getProgramParameter",
+      "kind": "native_register"
+    },
+    {
+      "target": "WebGLRenderingContext.prototype.getActiveUniform",
+      "kind": "native_register"
+    },
+    {
+      "target": "WebGLRenderingContext.prototype.getActiveAttrib",
+      "kind": "native_register"
+    },
+    {
+      "target": "WebGLRenderingContext.prototype.getUniformLocation",
+      "kind": "native_register"
+    },
+    {
+      "target": "WebGLRenderingContext.prototype.getAttribLocation",
+      "kind": "native_register"
+    },
+    {
+      "target": "WebGLRenderingContext.prototype.getBufferParameter",
+      "kind": "native_register"
+    },
+    {
+      "target": "WebGLRenderingContext.prototype.getError",
+      "kind": "native_register"
+    },
+    {
+      "target": "WebGLRenderingContext.prototype.isContextLost",
+      "kind": "native_register"
+    },
+    {
+      "target": "WebGLRenderingContext.prototype.flush",
+      "kind": "native_register"
+    },
+    {
+      "target": "WebGLRenderingContext.prototype.finish",
+      "kind": "native_register"
+    },
+    {
+      "target": "WebGLRenderingContext.prototype.drawingBufferWidth",
+      "kind": "native_register"
+    },
+    {
+      "target": "WebGLRenderingContext.prototype.drawingBufferHeight",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioContext.prototype.createOscillator",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioContext.prototype.createGain",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioContext.prototype.createAnalyser",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioContext.prototype.createDynamicsCompressor",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioContext.prototype.createBiquadFilter",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioContext.prototype.createBufferSource",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioContext.prototype.createMediaElementSource",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioContext.prototype.createMediaStreamSource",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioContext.prototype.createMediaStreamDestination",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioContext.prototype.createScriptProcessor",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioContext.prototype.createStereoPanner",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioContext.prototype.createPanner",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioContext.prototype.createConvolver",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioContext.prototype.createChannelSplitter",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioContext.prototype.createChannelMerger",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioContext.prototype.createDelay",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioContext.prototype.createPeriodicWave",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioContext.prototype.createWaveShaper",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioContext.prototype.resume",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioContext.prototype.suspend",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioContext.prototype.close",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioContext.prototype.getOutputTimestamp",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioContext.prototype.baseLatency",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioContext.prototype.outputLatency",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioContext.prototype.audioWorklet",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioContext.prototype.currentTime",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioContext.prototype.destination",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioContext.prototype.listener",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioContext.prototype.sampleRate",
+      "kind": "value",
+      "value": 48000
+    },
+    {
+      "target": "AudioContext.prototype.state",
+      "kind": "native_register"
+    },
+    {
+      "target": "OfflineAudioContext.prototype.startRendering",
+      "kind": "native_register"
+    },
+    {
+      "target": "OfflineAudioContext.prototype.suspend",
+      "kind": "native_register"
+    },
+    {
+      "target": "OfflineAudioContext.prototype.resume",
+      "kind": "native_register"
+    },
+    {
+      "target": "OfflineAudioContext.prototype.length",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioBuffer.prototype.copyFromChannel",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioBuffer.prototype.copyToChannel",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioBuffer.prototype.getChannelData",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioBuffer.prototype.duration",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioBuffer.prototype.length",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioBuffer.prototype.numberOfChannels",
+      "kind": "native_register"
+    },
+    {
+      "target": "AudioBuffer.prototype.sampleRate",
+      "kind": "value",
+      "value": 48000
+    },
+    {
+      "target": "AudioDestinationNode.prototype.maxChannelCount",
+      "kind": "native_register"
+    },
+    {
+      "target": "AnalyserNode.prototype.getByteFrequencyData",
+      "kind": "native_register"
+    },
+    {
+      "target": "AnalyserNode.prototype.getByteTimeDomainData",
+      "kind": "native_register"
+    },
+    {
+      "target": "AnalyserNode.prototype.getFloatFrequencyData",
+      "kind": "native_register"
+    },
+    {
+      "target": "AnalyserNode.prototype.getFloatTimeDomainData",
+      "kind": "native_register"
+    },
+    {
+      "target": "AnalyserNode.prototype.fftSize",
+      "kind": "native_register"
+    },
+    {
+      "target": "AnalyserNode.prototype.frequencyBinCount",
+      "kind": "native_register"
+    },
+    {
+      "target": "AnalyserNode.prototype.minDecibels",
+      "kind": "native_register"
+    },
+    {
+      "target": "AnalyserNode.prototype.maxDecibels",
+      "kind": "native_register"
+    },
+    {
+      "target": "AnalyserNode.prototype.smoothingTimeConstant",
+      "kind": "native_register"
+    },
+    {
+      "target": "Notification.permission",
+      "kind": "value",
+      "value": "default"
+    },
+    {
+      "target": "Notification.maxActions",
+      "kind": "value",
+      "value": 2
+    },
+    {
+      "target": "Performance.now",
+      "kind": "native_register"
+    },
+    {
+      "target": "Performance.prototype.now",
+      "kind": "native_register"
+    },
+    {
+      "target": "Performance.prototype.toJSON",
+      "kind": "native_register"
+    },
+    {
+      "target": "Performance.prototype.getEntries",
+      "kind": "native_register"
+    },
+    {
+      "target": "Performance.prototype.getEntriesByName",
+      "kind": "native_register"
+    },
+    {
+      "target": "Performance.prototype.getEntriesByType",
+      "kind": "native_register"
+    },
+    {
+      "target": "Performance.prototype.mark",
+      "kind": "native_register"
+    },
+    {
+      "target": "Performance.prototype.measure",
+      "kind": "native_register"
+    },
+    {
+      "target": "Performance.prototype.clearMarks",
+      "kind": "native_register"
+    },
+    {
+      "target": "Performance.prototype.clearMeasures",
+      "kind": "native_register"
+    },
+    {
+      "target": "PerformanceObserver.prototype.observe",
+      "kind": "native_register"
+    },
+    {
+      "target": "PerformanceObserver.prototype.disconnect",
+      "kind": "native_register"
+    },
+    {
+      "target": "PerformanceObserver.prototype.takeRecords",
+      "kind": "native_register"
+    },
+    {
+      "target": "PerformanceObserver.supportedEntryTypes",
+      "kind": "native_register"
+    },
+    {
+      "target": "Storage.prototype.key",
+      "kind": "native_register"
+    },
+    {
+      "target": "Storage.prototype.getItem",
+      "kind": "native_register"
+    },
+    {
+      "target": "Storage.prototype.setItem",
+      "kind": "native_register"
+    },
+    {
+      "target": "Storage.prototype.removeItem",
+      "kind": "native_register"
+    },
+    {
+      "target": "Storage.prototype.clear",
+      "kind": "native_register"
+    },
+    {
+      "target": "Storage.prototype.length",
+      "kind": "native_register"
+    },
+    {
+      "target": "localStorage",
+      "kind": "native_register"
+    },
+    {
+      "target": "sessionStorage",
+      "kind": "native_register"
+    },
+    {
+      "target": "indexedDB",
+      "kind": "native_register"
+    },
+    {
+      "target": "openDatabase",
+      "kind": "native_register"
+    },
+    {
+      "target": "caches",
+      "kind": "native_register"
+    },
+    {
+      "target": "Element.prototype.animate",
+      "kind": "native_register"
+    },
+    {
+      "target": "Element.prototype.scrollIntoView",
+      "kind": "native_register"
+    },
+    {
+      "target": "Element.prototype.scroll",
+      "kind": "native_register"
+    },
+    {
+      "target": "Element.prototype.scrollBy",
+      "kind": "native_register"
+    },
+    {
+      "target": "Element.prototype.scrollTo",
+      "kind": "native_register"
+    },
+    {
+      "target": "Element.prototype.attachShadow",
+      "kind": "native_register"
+    },
+    {
+      "target": "Element.prototype.getBoundingClientRect",
+      "kind": "native_register"
+    },
+    {
+      "target": "Element.prototype.getClientRects",
+      "kind": "native_register"
+    },
+    {
+      "target": "Element.prototype.checkVisibility",
+      "kind": "native_register"
+    },
+    {
+      "target": "Element.prototype.requestFullscreen",
+      "kind": "native_register"
+    },
+    {
+      "target": "Element.prototype.releasePointerCapture",
+      "kind": "native_register"
+    },
+    {
+      "target": "Element.prototype.setPointerCapture",
+      "kind": "native_register"
+    },
+    {
+      "target": "Element.prototype.hasPointerCapture",
+      "kind": "native_register"
+    },
+    {
+      "target": "Element.prototype.matches",
+      "kind": "native_register"
+    },
+    {
+      "target": "Element.prototype.closest",
+      "kind": "native_register"
+    },
+    {
+      "target": "Element.prototype.getAttribute",
+      "kind": "function",
+      "implementation": "const _n = arguments[0]; if (typeof _n === 'string' && (_n === 'webdriver' || _n === 'data-webdriver' || _n === 'data-selenium' || _n === 'selenium' || _n === 'data-driver' || _n.indexOf('webdriver') !== -1 || _n.indexOf('selenium') !== -1)) { return null; } return _orig_152.apply(this, arguments);"
+    },
+    {
+      "target": "Element.prototype.setAttribute",
+      "kind": "native_register"
+    },
+    {
+      "target": "Element.prototype.removeAttribute",
+      "kind": "native_register"
+    },
+    {
+      "target": "Element.prototype.hasAttribute",
+      "kind": "function",
+      "implementation": "const _n = arguments[0]; if (typeof _n === 'string' && (_n === 'webdriver' || _n === 'data-webdriver' || _n === 'data-selenium' || _n === 'selenium' || _n === 'data-driver' || _n.indexOf('webdriver') !== -1 || _n.indexOf('selenium') !== -1)) { return false; } return _orig_155.apply(this, arguments);"
+    },
+    {
+      "target": "Element.prototype.compareDocumentPosition",
+      "kind": "native_register"
+    },
+    {
+      "target": "Element.prototype.contains",
+      "kind": "native_register"
+    },
+    {
+      "target": "Element.prototype.cloneNode",
+      "kind": "native_register"
+    },
+    {
+      "target": "Element.prototype.insertAdjacentElement",
+      "kind": "native_register"
+    },
+    {
+      "target": "Element.prototype.insertAdjacentHTML",
+      "kind": "native_register"
+    },
+    {
+      "target": "Element.prototype.insertAdjacentText",
+      "kind": "native_register"
+    },
+    {
+      "target": "Element.prototype.requestPointerLock",
+      "kind": "native_register"
+    },
+    {
+      "target": "Element.prototype.exitPointerLock",
+      "kind": "native_register"
+    },
+    {
+      "target": "Element.prototype.getAnimations",
+      "kind": "native_register"
+    },
+    {
+      "target": "Element.prototype.getInnerHTML",
+      "kind": "native_register"
+    },
+    {
+      "target": "Element.prototype.toggleAttribute",
+      "kind": "native_register"
+    },
+    {
+      "target": "Document.prototype.timeline",
+      "kind": "native_register"
+    },
+    {
+      "target": "Document.prototype.elementFromPoint",
+      "kind": "native_register"
+    },
+    {
+      "target": "Document.prototype.elementsFromPoint",
+      "kind": "native_register"
+    },
+    {
+      "target": "Document.prototype.getAnimations",
+      "kind": "native_register"
+    },
+    {
+      "target": "Document.prototype.getSelection",
+      "kind": "native_register"
+    },
+    {
+      "target": "Document.prototype.hasFocus",
+      "kind": "native_register"
+    },
+    {
+      "target": "Document.prototype.exitFullscreen",
+      "kind": "native_register"
+    },
+    {
+      "target": "Document.prototype.exitPointerLock",
+      "kind": "native_register"
+    },
+    {
+      "target": "Document.prototype.createElement",
+      "kind": "native_register"
+    },
+    {
+      "target": "Document.prototype.createElementNS",
+      "kind": "native_register"
+    },
+    {
+      "target": "Document.prototype.createDocumentFragment",
+      "kind": "native_register"
+    },
+    {
+      "target": "Document.prototype.createTextNode",
+      "kind": "native_register"
+    },
+    {
+      "target": "Document.prototype.createComment",
+      "kind": "native_register"
+    },
+    {
+      "target": "Document.prototype.createRange",
+      "kind": "native_register"
+    },
+    {
+      "target": "Document.prototype.createEvent",
+      "kind": "native_register"
+    },
+    {
+      "target": "Document.prototype.querySelector",
+      "kind": "native_register"
+    },
+    {
+      "target": "Document.prototype.querySelectorAll",
+      "kind": "native_register"
+    },
+    {
+      "target": "Document.prototype.getElementById",
+      "kind": "native_register"
+    },
+    {
+      "target": "Document.prototype.getElementsByTagName",
+      "kind": "native_register"
+    },
+    {
+      "target": "Document.prototype.getElementsByClassName",
+      "kind": "native_register"
+    },
+    {
+      "target": "Document.prototype.getElementsByName",
+      "kind": "native_register"
+    },
+    {
+      "target": "Document.prototype.importNode",
+      "kind": "native_register"
+    },
+    {
+      "target": "Document.prototype.adoptNode",
+      "kind": "native_register"
+    },
+    {
+      "target": "Document.prototype.write",
+      "kind": "native_register"
+    },
+    {
+      "target": "Document.prototype.writeln",
+      "kind": "native_register"
+    },
+    {
+      "target": "Document.prototype.execCommand",
+      "kind": "native_register"
+    },
+    {
+      "target": "EventTarget.prototype.addEventListener",
+      "kind": "native_register"
+    },
+    {
+      "target": "EventTarget.prototype.removeEventListener",
+      "kind": "native_register"
+    },
+    {
+      "target": "EventTarget.prototype.dispatchEvent",
+      "kind": "native_register"
+    },
+    {
+      "target": "Event.prototype.preventDefault",
+      "kind": "native_register"
+    },
+    {
+      "target": "Event.prototype.stopPropagation",
+      "kind": "native_register"
+    },
+    {
+      "target": "Event.prototype.stopImmediatePropagation",
+      "kind": "native_register"
+    },
+    {
+      "target": "Event.prototype.composedPath",
+      "kind": "native_register"
+    },
+    {
+      "target": "CustomEvent.prototype.initCustomEvent",
+      "kind": "native_register"
+    },
+    {
+      "target": "Event.prototype.initEvent",
+      "kind": "native_register"
+    },
+    {
+      "target": "FocusEvent.prototype.relatedTarget",
+      "kind": "native_register"
+    },
+    {
+      "target": "FormDataEvent.prototype.formData",
+      "kind": "native_register"
+    },
+    {
+      "target": "PopStateEvent.prototype.state",
+      "kind": "native_register"
+    },
+    {
+      "target": "ContentVisibilityAutoStateChangeEvent.prototype.skipTransition",
+      "kind": "native_register"
+    },
+    {
+      "target": "InputDeviceCapabilities.prototype.firesTouchEvents",
+      "kind": "native_register"
+    },
+    {
+      "target": "Worker.prototype.postMessage",
+      "kind": "native_register"
+    },
+    {
+      "target": "Worker.prototype.terminate",
+      "kind": "native_register"
+    },
+    {
+      "target": "Worker.prototype.addEventListener",
+      "kind": "native_register"
+    },
+    {
+      "target": "Worker.prototype.removeEventListener",
+      "kind": "native_register"
+    },
+    {
+      "target": "Worker.prototype.dispatchEvent",
+      "kind": "native_register"
+    },
+    {
+      "target": "SharedWorker",
+      "kind": "native_register"
+    },
+    {
+      "target": "ServiceWorker",
+      "kind": "native_register"
+    },
+    {
+      "target": "ServiceWorkerRegistration",
+      "kind": "native_register"
+    },
+    {
+      "target": "ServiceWorkerContainer.prototype.register",
+      "kind": "native_register"
+    },
+    {
+      "target": "ServiceWorkerContainer.prototype.getRegistration",
+      "kind": "native_register"
+    },
+    {
+      "target": "ServiceWorkerContainer.prototype.getRegistrations",
+      "kind": "native_register"
+    },
+    {
+      "target": "BroadcastChannel",
+      "kind": "native_register"
+    },
+    {
+      "target": "MessageChannel",
+      "kind": "native_register"
+    },
+    {
+      "target": "Headers.prototype.append",
+      "kind": "native_register"
+    },
+    {
+      "target": "Headers.prototype.delete",
+      "kind": "native_register"
+    },
+    {
+      "target": "Headers.prototype.get",
+      "kind": "native_register"
+    },
+    {
+      "target": "Headers.prototype.has",
+      "kind": "native_register"
+    },
+    {
+      "target": "Headers.prototype.set",
+      "kind": "native_register"
+    },
+    {
+      "target": "Headers.prototype.entries",
+      "kind": "native_register"
+    },
+    {
+      "target": "Headers.prototype.keys",
+      "kind": "native_register"
+    },
+    {
+      "target": "Headers.prototype.values",
+      "kind": "native_register"
+    },
+    {
+      "target": "Headers.prototype.forEach",
+      "kind": "native_register"
+    },
+    {
+      "target": "Request.prototype.clone",
+      "kind": "native_register"
+    },
+    {
+      "target": "Response.prototype.clone",
+      "kind": "native_register"
+    },
+    {
+      "target": "Response.prototype.json",
+      "kind": "native_register"
+    },
+    {
+      "target": "Response.prototype.text",
+      "kind": "native_register"
+    },
+    {
+      "target": "Response.prototype.arrayBuffer",
+      "kind": "native_register"
+    },
+    {
+      "target": "Response.prototype.blob",
+      "kind": "native_register"
+    },
+    {
+      "target": "Response.prototype.formData",
+      "kind": "native_register"
+    },
+    {
+      "target": "Response.prototype.body",
+      "kind": "native_register"
+    },
+    {
+      "target": "Response.prototype.bodyUsed",
+      "kind": "native_register"
+    },
+    {
+      "target": "Response.prototype.headers",
+      "kind": "native_register"
+    },
+    {
+      "target": "Response.prototype.ok",
+      "kind": "native_register"
+    },
+    {
+      "target": "Response.prototype.status",
+      "kind": "native_register"
+    },
+    {
+      "target": "Response.prototype.statusText",
+      "kind": "native_register"
+    },
+    {
+      "target": "Response.prototype.type",
+      "kind": "native_register"
+    },
+    {
+      "target": "Response.prototype.url",
+      "kind": "native_register"
+    },
+    {
+      "target": "Response.prototype.redirect",
+      "kind": "native_register"
+    },
+    {
+      "target": "Response.error",
+      "kind": "native_register"
+    },
+    {
+      "target": "Response.redirect",
+      "kind": "native_register"
+    },
+    {
+      "target": "XMLHttpRequest.prototype.open",
+      "kind": "native_register"
+    },
+    {
+      "target": "XMLHttpRequest.prototype.send",
+      "kind": "native_register"
+    },
+    {
+      "target": "XMLHttpRequest.prototype.abort",
+      "kind": "native_register"
+    },
+    {
+      "target": "XMLHttpRequest.prototype.setRequestHeader",
+      "kind": "native_register"
+    },
+    {
+      "target": "XMLHttpRequest.prototype.getResponseHeader",
+      "kind": "native_register"
+    },
+    {
+      "target": "XMLHttpRequest.prototype.getAllResponseHeaders",
+      "kind": "native_register"
+    },
+    {
+      "target": "XMLHttpRequest.prototype.overrideMimeType",
+      "kind": "native_register"
+    },
+    {
+      "target": "XMLHttpRequest.prototype.readyState",
+      "kind": "native_register"
+    },
+    {
+      "target": "XMLHttpRequest.prototype.response",
+      "kind": "native_register"
+    },
+    {
+      "target": "XMLHttpRequest.prototype.responseText",
+      "kind": "native_register"
+    },
+    {
+      "target": "XMLHttpRequest.prototype.responseType",
+      "kind": "native_register"
+    },
+    {
+      "target": "XMLHttpRequest.prototype.responseURL",
+      "kind": "native_register"
+    },
+    {
+      "target": "XMLHttpRequest.prototype.responseXML",
+      "kind": "native_register"
+    },
+    {
+      "target": "XMLHttpRequest.prototype.status",
+      "kind": "native_register"
+    },
+    {
+      "target": "XMLHttpRequest.prototype.statusText",
+      "kind": "native_register"
+    },
+    {
+      "target": "XMLHttpRequest.prototype.timeout",
+      "kind": "native_register"
+    },
+    {
+      "target": "XMLHttpRequest.prototype.upload",
+      "kind": "native_register"
+    },
+    {
+      "target": "XMLHttpRequest.prototype.withCredentials",
+      "kind": "native_register"
+    },
+    {
+      "target": "EventSource",
+      "kind": "native_register"
+    },
+    {
+      "target": "RTCPeerConnection",
+      "kind": "native_register"
+    },
+    {
+      "target": "RTCPeerConnection.prototype.createOffer",
+      "kind": "native_register"
+    },
+    {
+      "target": "RTCPeerConnection.prototype.createAnswer",
+      "kind": "native_register"
+    },
+    {
+      "target": "RTCPeerConnection.prototype.setLocalDescription",
+      "kind": "native_register"
+    },
+    {
+      "target": "RTCPeerConnection.prototype.setRemoteDescription",
+      "kind": "native_register"
+    },
+    {
+      "target": "RTCPeerConnection.prototype.createDataChannel",
+      "kind": "native_register"
+    },
+    {
+      "target": "RTCPeerConnection.prototype.addIceCandidate",
+      "kind": "native_register"
+    },
+    {
+      "target": "RTCPeerConnection.prototype.close",
+      "kind": "native_register"
+    },
+    {
+      "target": "RTCPeerConnection.prototype.getStats",
+      "kind": "native_register"
+    },
+    {
+      "target": "RTCPeerConnection.prototype.addEventListener",
+      "kind": "native_register"
+    },
+    {
+      "target": "RTCPeerConnection.prototype.removeEventListener",
+      "kind": "native_register"
+    },
+    {
+      "target": "RTCPeerConnection.prototype.dispatchEvent",
+      "kind": "native_register"
+    },
+    {
+      "target": "RTCPeerConnection.prototype.connectionState",
+      "kind": "native_register"
+    },
+    {
+      "target": "RTCPeerConnection.prototype.iceConnectionState",
+      "kind": "native_register"
+    },
+    {
+      "target": "RTCPeerConnection.prototype.iceGatheringState",
+      "kind": "native_register"
+    },
+    {
+      "target": "RTCPeerConnection.prototype.localDescription",
+      "kind": "native_register"
+    },
+    {
+      "target": "RTCPeerConnection.prototype.remoteDescription",
+      "kind": "native_register"
+    },
+    {
+      "target": "RTCPeerConnection.prototype.signalingState",
+      "kind": "native_register"
+    },
+    {
+      "target": "RTCPeerConnection.prototype.canTrickleIceCandidates",
+      "kind": "native_register"
+    },
+    {
+      "target": "RTCPeerConnection.prototype.sctp",
+      "kind": "native_register"
+    },
+    {
+      "target": "Permission.prototype.query",
+      "kind": "native_register"
+    },
+    {
+      "target": "Permission.prototype.state",
+      "kind": "native_register"
+    },
+    {
+      "target": "Permission.prototype.name",
+      "kind": "native_register"
+    },
+    {
+      "target": "navigator.permissions",
+      "kind": "value",
+      "value": {
+        "query": "function() { return Promise.resolve({ state: \"prompt\", onchange: null, addEventListener: function() {}, removeEventListener: function() {}, dispatchEvent: function() { return true; } }); }",
+        "request": "function() { return Promise.reject(new Error(\"Not allowed\")); }",
+        "revoke": "function() { return Promise.resolve(); }",
+        "addEventListener": "function() {}",
+        "removeEventListener": "function() {}",
+        "dispatchEvent": "function() { return true; }"
+      }
+    },
+    {
+      "target": "navigator.geolocation",
+      "kind": "native_register"
+    },
+    {
+      "target": "navigator.mediaDevices",
+      "kind": "value",
+      "value": {
+        "enumerateDevices": "function() { return Promise.resolve([]); }",
+        "getSupportedConstraints": "function() { return { deviceId: true, groupId: true, width: true, height: true, aspectRatio: true, frameRate: true, facingMode: true, resizeMode: true, sampleRate: true, sampleSize: true, echoCancellation: true, autoGainControl: true, noiseSuppression: true, channelCount: true, latency: true, volume: true, suppressLocalAudioPlayback: true }; }",
+        "setSupportedActions": "function() {}",
+        "getUserMedia": "function() { return Promise.reject(new Error(\"Not allowed\")); }",
+        "getDisplayMedia": "function() { return Promise.reject(new Error(\"Not allowed\")); }",
+        "addEventListener": "function() {}",
+        "removeEventListener": "function() {}",
+        "dispatchEvent": "function() { return true; }",
+        "ondevicechange": null
+      }
+    },
+    {
+      "target": "navigator.mediaDevices.getUserMedia",
+      "kind": "native_register"
+    },
+    {
+      "target": "navigator.mediaDevices.enumerateDevices",
+      "kind": "native_register"
+    },
+    {
+      "target": "navigator.clipboard",
+      "kind": "native_register"
+    },
+    {
+      "target": "navigator.bluetooth",
+      "kind": "value",
+      "value": {
+        "referringDevice": null,
+        "addEventListener": "function() {}",
+        "removeEventListener": "function() {}",
+        "dispatchEvent": "function() { return true; }",
+        "getAvailability": "function() { return Promise.resolve(false); }",
+        "requestDevice": "function() { return Promise.reject(new Error(\"User cancelled\")); }",
+        "onavailabilitychanged": null,
+        "onadvertisementreceived": null,
+        "oncharacteristicvaluechanged": null,
+        "onnotificationreceived": null,
+        "onpairing": null,
+        "onservicechanged": null
+      }
+    },
+    {
+      "target": "navigator.usb",
+      "kind": "value",
+      "value": {
+        "addEventListener": "function() {}",
+        "removeEventListener": "function() {}",
+        "dispatchEvent": "function() { return true; }",
+        "requestDevice": "function() { return Promise.reject(new Error(\"User cancelled\")); }",
+        "getDevices": "function() { return Promise.resolve([]); }",
+        "onconnect": null,
+        "ondisconnect": null
+      }
+    },
+    {
+      "target": "navigator.serial",
+      "kind": "value",
+      "value": {
+        "addEventListener": "function() {}",
+        "removeEventListener": "function() {}",
+        "dispatchEvent": "function() { return true; }",
+        "requestPort": "function() { return Promise.reject(new Error(\"User cancelled\")); }",
+        "getPorts": "function() { return Promise.resolve([]); }",
+        "onconnect": null,
+        "ondisconnect": null
+      }
+    },
+    {
+      "target": "navigator.hid",
+      "kind": "value",
+      "value": {
+        "addEventListener": "function() {}",
+        "removeEventListener": "function() {}",
+        "dispatchEvent": "function() { return true; }",
+        "requestDevice": "function() { return Promise.reject(new Error(\"User cancelled\")); }",
+        "getDevices": "function() { return Promise.resolve([]); }",
+        "onconnect": null,
+        "ondisconnect": null
+      }
+    },
+    {
+      "target": "navigator.mediaSession",
+      "kind": "native_register"
+    },
+    {
+      "target": "navigator.presentation",
+      "kind": "native_register"
+    },
+    {
+      "target": "navigator.credentials",
+      "kind": "value",
+      "value": {
+        "get": "function() { return Promise.reject(new Error(\"Not allowed\")); }",
+        "create": "function() { return Promise.reject(new Error(\"Not allowed\")); }",
+        "store": "function() { return Promise.reject(new Error(\"Not allowed\")); }",
+        "preventSilentAccess": "function() { return Promise.resolve(); }",
+        "getDefault": "function() { return Promise.resolve(null); }",
+        "createDefault": "function() { return Promise.resolve(null); }",
+        "silentGet": "function() { return Promise.resolve(null); }"
+      }
+    },
+    {
+      "target": "navigator.ink",
+      "kind": "native_register"
+    },
+    {
+      "target": "navigator.userAgentData",
+      "kind": "native_register"
+    },
+    {
+      "target": "navigator.connection",
+      "kind": "native_register"
+    },
+    {
+      "target": "navigator.webkitPersistentStorage",
+      "kind": "native_register"
+    },
+    {
+      "target": "navigator.webkitTemporaryStorage",
+      "kind": "native_register"
+    },
+    {
+      "target": "navigator.battery",
+      "kind": "native_register"
+    },
+    {
+      "target": "navigator.scheduling",
+      "kind": "native_register"
+    },
+    {
+      "target": "navigator.pointerEnabled",
+      "kind": "native_register"
+    },
+    {
+      "target": "Document.prototype.fonts",
+      "kind": "native_register"
+    },
+    {
+      "target": "FontFaceSet.prototype.add",
+      "kind": "native_register"
+    },
+    {
+      "target": "FontFaceSet.prototype.delete",
+      "kind": "native_register"
+    },
+    {
+      "target": "FontFaceSet.prototype.has",
+      "kind": "native_register"
+    },
+    {
+      "target": "FontFaceSet.prototype.clear",
+      "kind": "native_register"
+    },
+    {
+      "target": "FontFaceSet.prototype.forEach",
+      "kind": "native_register"
+    },
+    {
+      "target": "FontFaceSet.prototype.size",
+      "kind": "native_register"
+    },
+    {
+      "target": "FontFaceSet.prototype.status",
+      "kind": "native_register"
+    },
+    {
+      "target": "FontFaceSet.prototype.load",
+      "kind": "native_register"
+    },
+    {
+      "target": "FontFace.prototype.family",
+      "kind": "native_register"
+    },
+    {
+      "target": "FontFace.prototype.style",
+      "kind": "native_register"
+    },
+    {
+      "target": "FontFace.prototype.weight",
+      "kind": "native_register"
+    },
+    {
+      "target": "FontFace.prototype.stretch",
+      "kind": "native_register"
+    },
+    {
+      "target": "FontFace.prototype.unicodeRange",
+      "kind": "native_register"
+    },
+    {
+      "target": "FontFace.prototype.featureSettings",
+      "kind": "native_register"
+    },
+    {
+      "target": "FontFace.prototype.variationSettings",
+      "kind": "native_register"
+    },
+    {
+      "target": "FontFace.prototype.display",
+      "kind": "native_register"
+    },
+    {
+      "target": "FontFace.prototype.load",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.requestAnimationFrame",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.cancelAnimationFrame",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.requestIdleCallback",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.cancelIdleCallback",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.matchMedia",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.getComputedStyle",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.getSelection",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.scroll",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.scrollBy",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.scrollTo",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.scrollX",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.scrollY",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.pageXOffset",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.pageYOffset",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.innerWidth",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.innerHeight",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.outerWidth",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.outerHeight",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.devicePixelRatio",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.screen",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.screenX",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.screenY",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.screenLeft",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.screenTop",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.closed",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.length",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.opener",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.parent",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.top",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.window",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.self",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.frames",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.name",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.status",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.locationbar",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.menubar",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.personalbar",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.scrollbars",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.statusbar",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.toolbar",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.localStorage",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.sessionStorage",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.indexedDB",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.caches",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.crypto",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.isSecureContext",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.crossOriginIsolated",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.origin",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.scheduler",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.launchQueue",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.documentPictureInPicture",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.open",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.close",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.focus",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.blur",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.print",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.stop",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.alert",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.confirm",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.prompt",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.postMessage",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.find",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.moveBy",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.moveTo",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.resizeBy",
+      "kind": "native_register"
+    },
+    {
+      "target": "Window.prototype.resizeTo",
+      "kind": "native_register"
+    },
+    {
+      "target": "MutationObserver.prototype.observe",
+      "kind": "native_register"
+    },
+    {
+      "target": "MutationObserver.prototype.disconnect",
+      "kind": "native_register"
+    },
+    {
+      "target": "MutationObserver.prototype.takeRecords",
+      "kind": "native_register"
+    },
+    {
+      "target": "IntersectionObserver.prototype.observe",
+      "kind": "native_register"
+    },
+    {
+      "target": "IntersectionObserver.prototype.unobserve",
+      "kind": "native_register"
+    },
+    {
+      "target": "IntersectionObserver.prototype.disconnect",
+      "kind": "native_register"
+    },
+    {
+      "target": "IntersectionObserver.prototype.takeRecords",
+      "kind": "native_register"
+    },
+    {
+      "target": "IntersectionObserver.prototype.root",
+      "kind": "native_register"
+    },
+    {
+      "target": "IntersectionObserver.prototype.rootMargin",
+      "kind": "native_register"
+    },
+    {
+      "target": "IntersectionObserver.prototype.thresholds",
+      "kind": "native_register"
+    },
+    {
+      "target": "ResizeObserver.prototype.observe",
+      "kind": "native_register"
+    },
+    {
+      "target": "ResizeObserver.prototype.unobserve",
+      "kind": "native_register"
+    },
+    {
+      "target": "ResizeObserver.prototype.disconnect",
+      "kind": "native_register"
+    },
+    {
+      "target": "MutationObserver",
+      "kind": "value",
+      "value": {
+        "observe": "function() {}",
+        "disconnect": "function() {}",
+        "takeRecords": "function() { return []; }"
+      }
+    },
+    {
+      "target": "IntersectionObserver",
+      "kind": "value",
+      "value": {
+        "root": null,
+        "rootMargin": "0px",
+        "thresholds": [
+          0
+        ],
+        "observe": "function() {}",
+        "unobserve": "function() {}",
+        "disconnect": "function() {}",
+        "takeRecords": "function() { return []; }",
+        "addEventListener": "function() {}",
+        "removeEventListener": "function() {}",
+        "dispatchEvent": "function() { return true; }"
+      }
+    },
+    {
+      "target": "ResizeObserver",
+      "kind": "value",
+      "value": {
+        "observe": "function() {}",
+        "unobserve": "function() {}",
+        "disconnect": "function() {}",
+        "addEventListener": "function() {}",
+        "removeEventListener": "function() {}",
+        "dispatchEvent": "function() { return true; }"
+      }
+    },
+    {
+      "target": "PerformanceObserver",
+      "kind": "native_register"
+    },
+    {
+      "target": "ReportingObserver",
+      "kind": "native_register"
+    },
+    {
+      "target": "XSLTProcessor",
+      "kind": "native_register"
+    },
+    {
+      "target": "XMLSerializer",
+      "kind": "native_register"
+    },
+    {
+      "target": "DOMParser",
+      "kind": "native_register"
+    },
+    {
+      "target": "XPathEvaluator",
+      "kind": "native_register"
+    },
+    {
+      "target": "XPathExpression",
+      "kind": "native_register"
+    },
+    {
+      "target": "XPathResult",
+      "kind": "native_register"
+    },
+    {
+      "target": "XSLTProcessor.prototype.transformToFragment",
+      "kind": "native_register"
+    },
+    {
+      "target": "XSLTProcessor.prototype.transformToDocument",
+      "kind": "native_register"
+    },
+    {
+      "target": "XSLTProcessor.prototype.importStylesheet",
+      "kind": "native_register"
+    },
+    {
+      "target": "XSLTProcessor.prototype.reset",
+      "kind": "native_register"
+    },
+    {
+      "target": "XMLSerializer.prototype.serializeToString",
+      "kind": "native_register"
+    },
+    {
+      "target": "DOMParser.prototype.parseFromString",
+      "kind": "native_register"
+    },
+    {
+      "target": "XPathEvaluator.prototype.createExpression",
+      "kind": "native_register"
+    },
+    {
+      "target": "XPathEvaluator.prototype.evaluate",
+      "kind": "native_register"
+    },
+    {
+      "target": "XPathEvaluator.prototype.createNSResolver",
+      "kind": "native_register"
+    },
+    {
+      "target": "CustomElementRegistry.prototype.define",
+      "kind": "native_register"
+    },
+    {
+      "target": "CustomElementRegistry.prototype.get",
+      "kind": "native_register"
+    },
+    {
+      "target": "CustomElementRegistry.prototype.upgrade",
+      "kind": "native_register"
+    },
+    {
+      "target": "CustomElementRegistry.prototype.whenDefined",
+      "kind": "native_register"
+    },
+    {
+      "target": "customElements",
+      "kind": "value",
+      "value": {
+        "define": "function() {}",
+        "get": "function() { return undefined; }",
+        "whenDefined": "function() { return Promise.resolve(undefined); }",
+        "upgrade": "function() {}"
+      }
+    },
+    {
+      "target": "TrustedTypes",
+      "kind": "native_register"
+    },
+    {
+      "target": "TrustedTypePolicyFactory.prototype.createPolicy",
+      "kind": "native_register"
+    },
+    {
+      "target": "TrustedTypePolicyFactory.prototype.getPolicyTypeNames",
+      "kind": "native_register"
+    },
+    {
+      "target": "TrustedTypePolicyFactory.prototype.isHTML",
+      "kind": "native_register"
+    },
+    {
+      "target": "TrustedTypePolicyFactory.prototype.isScriptURL",
+      "kind": "native_register"
+    },
+    {
+      "target": "TrustedTypePolicyFactory.prototype.isURL",
+      "kind": "native_register"
+    },
+    {
+      "target": "TrustedTypePolicyFactory.prototype.emptyHTML",
+      "kind": "native_register"
+    },
+    {
+      "target": "TrustedTypePolicyFactory.prototype.emptyScript",
+      "kind": "native_register"
+    },
+    {
+      "target": "TrustedHTML",
+      "kind": "native_register"
+    },
+    {
+      "target": "TrustedScript",
+      "kind": "native_register"
+    },
+    {
+      "target": "TrustedScriptURL",
+      "kind": "native_register"
+    },
+    {
+      "target": "SubtleCrypto.prototype.encrypt",
+      "kind": "native_register"
+    },
+    {
+      "target": "SubtleCrypto.prototype.decrypt",
+      "kind": "native_register"
+    },
+    {
+      "target": "SubtleCrypto.prototype.sign",
+      "kind": "native_register"
+    },
+    {
+      "target": "SubtleCrypto.prototype.verify",
+      "kind": "native_register"
+    },
+    {
+      "target": "SubtleCrypto.prototype.digest",
+      "kind": "native_register"
+    },
+    {
+      "target": "SubtleCrypto.prototype.generateKey",
+      "kind": "native_register"
+    },
+    {
+      "target": "SubtleCrypto.prototype.importKey",
+      "kind": "native_register"
+    },
+    {
+      "target": "SubtleCrypto.prototype.exportKey",
+      "kind": "native_register"
+    },
+    {
+      "target": "SubtleCrypto.prototype.deriveKey",
+      "kind": "native_register"
+    },
+    {
+      "target": "SubtleCrypto.prototype.deriveBits",
+      "kind": "native_register"
+    },
+    {
+      "target": "SubtleCrypto.prototype.wrapKey",
+      "kind": "native_register"
+    },
+    {
+      "target": "SubtleCrypto.prototype.unwrapKey",
+      "kind": "native_register"
+    },
+    {
+      "target": "Crypto.prototype.getRandomValues",
+      "kind": "native_register"
+    },
+    {
+      "target": "Crypto.prototype.randomUUID",
+      "kind": "native_register"
+    },
+    {
+      "target": "Crypto.prototype.subtle",
+      "kind": "native_register"
+    },
+    {
+      "target": "navigator.plugins",
+      "kind": "value",
+      "value": [
+        {
+          "name": "PDF Viewer",
+          "filename": "internal-pdf-viewer",
+          "description": "Portable Document Format",
+          "length": 1
+        },
+        {
+          "name": "Chrome PDF Viewer",
+          "filename": "internal-pdf-viewer",
+          "description": "Portable Document Format",
+          "length": 1
+        },
+        {
+          "name": "Chromium PDF Viewer",
+          "filename": "internal-pdf-viewer",
+          "description": "Portable Document Format",
+          "length": 1
+        },
+        {
+          "name": "Microsoft Edge PDF Viewer",
+          "filename": "internal-pdf-viewer",
+          "description": "Portable Document Format",
+          "length": 1
+        },
+        {
+          "name": "WebKit built-in PDF",
+          "filename": "internal-pdf-viewer",
+          "description": "Portable Document Format",
+          "length": 1
+        }
+      ]
+    },
+    {
+      "target": "navigator.mimeTypes",
+      "kind": "value",
+      "value": [
+        {
+          "type": "application/pdf",
+          "suffixes": "pdf",
+          "description": "Portable Document Format",
+          "__pluginName": "PDF Viewer"
+        },
+        {
+          "type": "text/pdf",
+          "suffixes": "pdf",
+          "description": "Portable Document Format",
+          "__pluginName": "PDF Viewer"
+        }
+      ]
+    },
+    {
+      "target": "Intl.Collator.prototype.resolvedOptions",
+      "kind": "function",
+      "implementation": "const _r = _orig_460.call(this); const _loc = (typeof window !== 'undefined' && window.__cloak_persona_locale) || 'en-US'; return Object.assign({}, _r, { locale: _loc });"
+    },
+    {
+      "target": "Intl.NumberFormat.prototype.resolvedOptions",
+      "kind": "function",
+      "implementation": "const _r = _orig_461.call(this); const _loc = (typeof window !== 'undefined' && window.__cloak_persona_locale) || 'en-US'; return Object.assign({}, _r, { locale: _loc });"
+    },
+    {
+      "target": "screen.orientation",
+      "kind": "value",
+      "value": {
+        "type": "landscape-primary",
+        "angle": 0
+      }
+    },
+    {
+      "target": "performance.now",
+      "kind": "native_register"
+    },
+    {
+      "target": "WebGLRenderingContext.prototype.getParameter",
+      "kind": "function",
+      "implementation": "const _p = arguments[0]; if (_p === 0x9245 /* UNMASKED_VENDOR_WEBGL */) return 'Google Inc. (NVIDIA)'; if (_p === 0x9246 /* UNMASKED_RENDERER_WEBGL */) return 'ANGLE (NVIDIA, NVIDIA GeForce GTX 1080 Ti Direct3D11 vs_5_0 ps_5_0)'; return _orig_464.apply(this, arguments);"
+    },
+    {
+      "target": "WebGL2RenderingContext.prototype.getParameter",
+      "kind": "function",
+      "implementation": "const _p = arguments[0]; if (_p === 0x9245) return 'Google Inc. (NVIDIA)'; if (_p === 0x9246) return 'ANGLE (NVIDIA, NVIDIA GeForce GTX 1080 Ti Direct3D11 vs_5_0 ps_5_0)'; return _orig_465.apply(this, arguments);"
+    },
+    {
+      "target": "RTCPeerConnection",
+      "kind": "function",
+      "implementation": "const _config = arguments[0] || {}; _config.iceTransportPolicy = 'relay'; _config.iceServers = _config.iceServers || []; return new _orig_466(_config);"
+    },
+    {
+      "target": "RTCPeerConnection.prototype.createOffer",
+      "kind": "function",
+      "implementation": "return _orig_467.apply(this, arguments).then(function(_offer) { if (_offer && _offer.sdp) { _offer.sdp = _offer.sdp.replace(/a=candidate:[^\\r\\n]+typ host[^\\r\\n]*/g, ''); _offer.sdp = _offer.sdp.replace(/a=candidate:[^\\r\\n]+typ srflx[^\\r\\n]*/g, ''); _offer.sdp = _offer.sdp.replace(/a=candidate:[^\\r\\n]+typ prflx[^\\r\\n]*/g, ''); } return _offer; });"
+    },
+    {
+      "target": "RTCPeerConnection.prototype.createAnswer",
+      "kind": "function",
+      "implementation": "return _orig_468.apply(this, arguments).then(function(_answer) { if (_answer && _answer.sdp) { _answer.sdp = _answer.sdp.replace(/a=candidate:[^\\r\\n]+typ host[^\\r\\n]*/g, ''); _answer.sdp = _answer.sdp.replace(/a=candidate:[^\\r\\n]+typ srflx[^\\r\\n]*/g, ''); _answer.sdp = _answer.sdp.replace(/a=candidate:[^\\r\\n]+typ prflx[^\\r\\n]*/g, ''); } return _answer; });"
+    },
+    {
+      "target": "RTCPeerConnection.prototype.setLocalDescription",
+      "kind": "function",
+      "implementation": "const _desc = arguments[0]; if (_desc && _desc.sdp) { _desc.sdp = _desc.sdp.replace(/a=candidate:[^\\r\\n]+typ host[^\\r\\n]*/g, ''); _desc.sdp = _desc.sdp.replace(/a=candidate:[^\\r\\n]+typ srflx[^\\r\\n]*/g, ''); _desc.sdp = _desc.sdp.replace(/a=candidate:[^\\r\\n]+typ prflx[^\\r\\n]*/g, ''); } return _orig_469.call(this, _desc, arguments[1]);"
+    },
+    {
+      "target": "RTCPeerConnection.prototype.getStats",
+      "kind": "function",
+      "implementation": "return _orig_470.apply(this, arguments);"
+    },
+    {
+      "target": "Document.prototype.hidden",
+      "kind": "value",
+      "value": false
+    },
+    {
+      "target": "Document.prototype.visibilityState",
+      "kind": "value",
+      "value": "visible"
+    },
+    {
+      "target": "Document.prototype.webkitHidden",
+      "kind": "value",
+      "value": false
+    },
+    {
+      "target": "document.documentElement.clientWidth",
+      "kind": "value",
+      "value": 1920
+    },
+    {
+      "target": "document.documentElement.clientHeight",
+      "kind": "value",
+      "value": 969
+    },
+    {
+      "target": "document.body.clientWidth",
+      "kind": "value",
+      "value": 1920
+    },
+    {
+      "target": "document.body.clientHeight",
+      "kind": "value",
+      "value": 969
+    },
+    {
+      "target": "performance.memory",
+      "kind": "value",
+      "value": {
+        "jsHeapSizeLimit": 4294705152,
+        "totalJSHeapSize": 10000000,
+        "usedJSHeapSize": 5000000
+      }
+    },
+    {
+      "target": "navigator.globalPrivacyControl",
+      "kind": "value",
+      "value": false
+    },
+    {
+      "target": "window.webkitURL",
+      "kind": "value",
+      "value": {}
+    },
+    {
+      "target": "URL.createObjectURL",
+      "kind": "native_register"
+    },
+    {
+      "target": "URL.revokeObjectURL",
+      "kind": "native_register"
+    },
+    {
+      "target": "navigator.storage",
+      "kind": "value",
+      "value": {
+        "estimate": "function() { return Promise.resolve({ quota: 1000000000, usage: 0 }); }",
+        "persist": "function() { return Promise.resolve(true); }",
+        "persisted": "function() { return Promise.resolve(false); }"
+      }
+    },
+    {
+      "target": "window.speechSynthesis",
+      "kind": "value",
+      "value": {
+        "speaking": false,
+        "pending": false,
+        "paused": false,
+        "onvoiceschanged": null,
+        "getVoices": "function() { return []; }",
+        "speak": "function() {}",
+        "cancel": "function() {}",
+        "pause": "function() {}",
+        "resume": "function() {}"
+      }
+    },
+    {
+      "target": "window.matchMedia",
+      "kind": "function",
+      "implementation": "const _q = arguments[0]; const _screen = (typeof window !== 'undefined' && window.__cloak_persona_screen) ? window.__cloak_persona_screen : { width: 1920, height: 1080 }; let _matches = false; if (typeof _q === 'string') { if (_q.indexOf('max-width: ' + _screen.width) === 0) _matches = true; if (_q.indexOf('max-height: ' + _screen.height) === 0) _matches = true; if (_q.indexOf('min-width:') === 0) _matches = true; if (_q.indexOf('min-height:') === 0) _matches = true; if (_q.indexOf('prefers-color-scheme: light') !== -1) _matches = true; if (_q.indexOf('prefers-color-scheme: dark') !== -1) _matches = false; if (_q.indexOf('prefers-reduced-motion') !== -1) _matches = false; if (_q.indexOf('orientation: portrait') !== -1 && _screen.width < _screen.height) _matches = true; if (_q.indexOf('orientation: landscape') !== -1 && _screen.width >= _screen.height) _matches = true; } return { matches: _matches, media: _q, onchange: null, addListener: function() {}, removeListener: function() {}, addEventListener: function() {}, removeEventListener: function() {}, dispatchEvent: function() { return true; } };"
+    },
+    {
+      "target": "Intl.ListFormat.prototype.resolvedOptions",
+      "kind": "function",
+      "implementation": "const _r = _orig_486.call(this); const _loc = (typeof window !== 'undefined' && window.__cloak_persona_locale) || 'en-US'; return Object.assign({}, _r, { locale: _loc });"
+    },
+    {
+      "target": "Intl.RelativeTimeFormat.prototype.resolvedOptions",
+      "kind": "function",
+      "implementation": "const _r = _orig_487.call(this); const _loc = (typeof window !== 'undefined' && window.__cloak_persona_locale) || 'en-US'; return Object.assign({}, _r, { locale: _loc });"
+    },
+    {
+      "target": "Intl.PluralRules.prototype.resolvedOptions",
+      "kind": "function",
+      "implementation": "const _r = _orig_488.call(this); const _loc = (typeof window !== 'undefined' && window.__cloak_persona_locale) || 'en-US'; return Object.assign({}, _r, { locale: _loc });"
+    },
+    {
+      "target": "Intl.Segmenter.prototype.resolvedOptions",
+      "kind": "function",
+      "implementation": "const _r = _orig_489.call(this); const _loc = (typeof window !== 'undefined' && window.__cloak_persona_locale) || 'en-US'; return Object.assign({}, _r, { locale: _loc });"
+    },
+    {
+      "target": "Intl.DisplayNames.prototype.resolvedOptions",
+      "kind": "function",
+      "implementation": "const _r = _orig_490.call(this); const _loc = (typeof window !== 'undefined' && window.__cloak_persona_locale) || 'en-US'; return Object.assign({}, _r, { locale: _loc });"
+    },
+    {
+      "target": "Intl.supportedValuesOf",
+      "kind": "function",
+      "implementation": "const _key = arguments[0]; const _values = { 'calendar': ['gregory', 'chinese', 'roc', 'indian', 'thai-buddhist', 'japanese', 'hebrew', 'islamic-civil', 'islamic-tbla', 'persian', 'coptic', 'ethiopic', 'ethioaa', 'iso8601', 'dangi'], 'collation': ['big5han', 'dict', 'direct', 'ducet', 'gb2312', 'phonebk', 'phonetic', 'pinyin', 'search', 'standard', 'stroke', 'trad', 'unihan', 'zhuyin'], 'currency': ['USD', 'EUR', 'JPY', 'GBP', 'CNY', 'CAD', 'AUD', 'CHF', 'INR'], 'numberingSystem': ['arab', 'arabext', 'bali', 'beng', 'deva', 'fullwide', 'gujr', 'guru', 'hanidec', 'khmr', 'knda', 'laoo', 'latn', 'limb', 'mlym', 'mong', 'mymr', 'orya', 'tamldec', 'telu', 'thai', 'tibt'], 'timeZone': ['UTC', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Asia/Tokyo', 'Asia/Shanghai', 'Asia/Kolkata', 'Australia/Sydney'], 'unit': ['celsius', 'fahrenheit', 'kelvin', 'meter', 'kilometer', 'mile', 'inch', 'foot', 'pound', 'kilogram', 'gram', 'liter', 'gallon', 'second', 'minute', 'hour', 'day', 'week', 'month', 'year'] }; return _values[_key] || [];"
+    },
+    {
+      "target": "window.isSecureContext",
+      "kind": "value",
+      "value": true
+    },
+    {
+      "target": "window.crossOriginIsolated",
+      "kind": "value",
+      "value": false
+    },
+    {
+      "target": "window.name",
+      "kind": "value",
+      "value": ""
+    },
+    {
+      "target": "window.origin",
+      "kind": "getter",
+      "value": "return (typeof location !== 'undefined' && location.origin) || '';"
+    },
+    {
+      "target": "window.visualViewport",
+      "kind": "value",
+      "value": {
+        "width": 1920,
+        "height": 969,
+        "offsetLeft": 0,
+        "offsetTop": 0,
+        "pageLeft": 0,
+        "pageTop": 0,
+        "scale": 1
+      }
+    },
+    {
+      "target": "window.screenX",
+      "kind": "value",
+      "value": 0
+    },
+    {
+      "target": "window.screenY",
+      "kind": "value",
+      "value": 0
+    },
+    {
+      "target": "window.screenLeft",
+      "kind": "value",
+      "value": 0
+    },
+    {
+      "target": "window.screenTop",
+      "kind": "value",
+      "value": 0
+    },
+    {
+      "target": "window.scrollX",
+      "kind": "value",
+      "value": 0
+    },
+    {
+      "target": "window.scrollY",
+      "kind": "value",
+      "value": 0
+    },
+    {
+      "target": "window.pageXOffset",
+      "kind": "value",
+      "value": 0
+    },
+    {
+      "target": "window.pageYOffset",
+      "kind": "value",
+      "value": 0
+    },
+    {
+      "target": "console.log",
+      "kind": "native_register"
+    },
+    {
+      "target": "console.error",
+      "kind": "native_register"
+    },
+    {
+      "target": "console.warn",
+      "kind": "native_register"
+    },
+    {
+      "target": "console.info",
+      "kind": "native_register"
+    },
+    {
+      "target": "console.debug",
+      "kind": "native_register"
+    },
+    {
+      "target": "console.trace",
+      "kind": "native_register"
+    },
+    {
+      "target": "console.dir",
+      "kind": "native_register"
+    },
+    {
+      "target": "console.group",
+      "kind": "native_register"
+    },
+    {
+      "target": "console.groupCollapsed",
+      "kind": "native_register"
+    },
+    {
+      "target": "console.groupEnd",
+      "kind": "native_register"
+    },
+    {
+      "target": "console.time",
+      "kind": "native_register"
+    },
+    {
+      "target": "console.timeEnd",
+      "kind": "native_register"
+    },
+    {
+      "target": "console.timeLog",
+      "kind": "native_register"
+    },
+    {
+      "target": "console.timeStamp",
+      "kind": "native_register"
+    },
+    {
+      "target": "console.profile",
+      "kind": "native_register"
+    },
+    {
+      "target": "console.profileEnd",
+      "kind": "native_register"
+    },
+    {
+      "target": "console.assert",
+      "kind": "native_register"
+    },
+    {
+      "target": "console.count",
+      "kind": "native_register"
+    },
+    {
+      "target": "console.countReset",
+      "kind": "native_register"
+    },
+    {
+      "target": "console.table",
+      "kind": "native_register"
+    },
+    {
+      "target": "navigator.appCodeName",
+      "kind": "value",
+      "value": "Mozilla"
+    },
+    {
+      "target": "navigator.appName",
+      "kind": "value",
+      "value": "Netscape"
+    },
+    {
+      "target": "navigator.appVersion",
+      "kind": "value",
+      "value": "5.0 (Windows)"
+    },
+    {
+      "target": "navigator.product",
+      "kind": "value",
+      "value": "Gecko"
+    },
+    {
+      "target": "navigator.productSub",
+      "kind": "value",
+      "value": "20030107"
+    },
+    {
+      "target": "navigator.vendorSub",
+      "kind": "value",
+      "value": ""
+    },
+    {
+      "target": "navigator.buildID",
+      "kind": "value",
+      "value": ""
+    },
+    {
+      "target": "navigator.oscpu",
+      "kind": "value",
+      "value": ""
+    },
+    {
+      "target": "navigator.standalone",
+      "kind": "value",
+      "value": false
+    },
+    {
+      "target": "navigator.onLine",
+      "kind": "value",
+      "value": true
+    },
+    {
+      "target": "navigator.getBattery",
+      "kind": "function",
+      "value": "return Promise.resolve({ charging: true, chargingTime: 0, dischargingTime: Infinity, level: 1, addEventListener: function() {}, removeEventListener: function() {}, dispatchEvent: function() { return true; } });"
+    },
+    {
+      "target": "navigator.getGamepads",
+      "kind": "function",
+      "value": "return [];"
+    },
+    {
+      "target": "OfflineAudioContext.prototype.sampleRate",
+      "kind": "value",
+      "value": 48000
+    },
+    {
+      "target": "BaseAudioContext.prototype.sampleRate",
+      "kind": "value",
+      "value": 48000
+    },
+    {
+      "target": "WebGLRenderingContext.WEBGL_debug_renderer_info",
+      "kind": "value",
+      "value": {
+        "UNMASKED_VENDOR_WEBGL": 37445,
+        "UNMASKED_RENDERER_WEBGL": 37446
+      }
+    },
+    {
+      "target": "WebGL2RenderingContext.WEBGL_debug_renderer_info",
+      "kind": "value",
+      "value": {
+        "UNMASKED_VENDOR_WEBGL": 37445,
+        "UNMASKED_RENDERER_WEBGL": 37446
+      }
+    },
+    {
+      "target": "navigator.xr",
+      "kind": "value",
+      "value": {
+        "ondevicechange": null,
+        "addEventListener": "function() {}",
+        "removeEventListener": "function() {}",
+        "dispatchEvent": "function() { return true; }",
+        "isSessionSupported": "function() { return Promise.resolve(false); }",
+        "requestSession": "function() { return Promise.reject(new Error('Not supported')); }"
+      }
+    },
+    {
+      "target": "MediaCapabilities",
+      "kind": "value",
+      "value": "function MediaCapabilities() { this.encodingInfo = function() { return Promise.resolve({ supported: true, smooth: true, powerEfficient: true }); }; }"
+    },
+    {
+      "target": "PerformanceServerTiming",
+      "kind": "value",
+      "value": "function PerformanceServerTiming() {}"
+    },
+    {
+      "target": "PermissionStatus",
+      "kind": "value",
+      "value": "function PermissionStatus() { this.state = 'prompt'; this.onchange = null; this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; }"
+    },
+    {
+      "target": "ManagedMediaSource",
+      "kind": "value",
+      "value": "function ManagedMediaSource() { this.readyState = 'open'; this.endOfStream = function() {}; this.addSourceBuffer = function() {}; this.activeSourceBuffers = []; this.sourceBuffers = []; this.duration = NaN; this.currentTime = 0; this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; }"
+    },
+    {
+      "target": "NetworkInformation",
+      "kind": "value",
+      "value": "function NetworkInformation() { this.type = 'wifi'; this.effectiveType = '4g'; this.downlink = 10; this.rtt = 50; this.saveData = false; this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; }"
+    },
+    {
+      "target": "IDBFactory",
+      "kind": "value",
+      "value": "function IDBFactory() { this.open = function() { return { addEventListener: function() {}, removeEventListener: function() {}, dispatchEvent: function() { return true; }, onsuccess: null, onerror: null }; }; this.deleteDatabase = function() { return { addEventListener: function() {}, removeEventListener: function() {} }; }; this.cmp = function() { return 1; }; this.databases = function() { return Promise.resolve([]); }; }"
+    },
+    {
+      "target": "DeviceMotionEvent",
+      "kind": "value",
+      "value": "function DeviceMotionEvent() {}"
+    },
+    {
+      "target": "DeviceOrientationEvent",
+      "kind": "value",
+      "value": "function DeviceOrientationEvent() {}"
+    },
+    {
+      "target": "SharedArrayBuffer",
+      "kind": "value",
+      "value": "function SharedArrayBuffer(length) { return new ArrayBuffer(length); }"
+    },
+    {
+      "target": "Atomics",
+      "kind": "value",
+      "value": {}
+    },
+    {
+      "target": "crypto.subtle",
+      "kind": "value",
+      "value": {
+        "encrypt": "function() { return Promise.resolve(new ArrayBuffer(0)); }",
+        "decrypt": "function() { return Promise.resolve(new ArrayBuffer(0)); }",
+        "sign": "function() { return Promise.resolve(new ArrayBuffer(0)); }",
+        "verify": "function() { return Promise.resolve(true); }",
+        "digest": "function() { return Promise.resolve(new ArrayBuffer(32)); }",
+        "generateKey": "function() { return Promise.resolve({}); }",
+        "importKey": "function() { return Promise.resolve({}); }",
+        "exportKey": "function() { return Promise.resolve(new ArrayBuffer(0)); }",
+        "deriveKey": "function() { return Promise.resolve({}); }",
+        "deriveBits": "function() { return Promise.resolve(new ArrayBuffer(0)); }",
+        "wrapKey": "function() { return Promise.resolve(new ArrayBuffer(0)); }",
+        "unwrapKey": "function() { return Promise.resolve({}); }"
+      }
+    },
+    {
+      "target": "SecurityPolicyViolationEvent",
+      "kind": "value",
+      "value": "function SecurityPolicyViolationEvent() {}"
+    },
+    {
+      "target": "PromiseRejectionEvent",
+      "kind": "value",
+      "value": "function PromiseRejectionEvent() {}"
+    },
+    {
+      "target": "ErrorEvent",
+      "kind": "value",
+      "value": "function ErrorEvent() {}"
+    },
+    {
+      "target": "MessageEvent",
+      "kind": "value",
+      "value": "function MessageEvent() {}"
+    },
+    {
+      "target": "PushManager",
+      "kind": "value",
+      "value": "function PushManager() { this.subscribe = function() { return Promise.reject(new Error('Not supported')); }; this.getSubscription = function() { return Promise.resolve(null); }; this.permissionState = function() { return Promise.resolve('denied'); }; }"
+    },
+    {
+      "target": "PushSubscription",
+      "kind": "value",
+      "value": "function PushSubscription() { this.endpoint = ''; this.expirationTime = null; this.options = {}; this.unsubscribe = function() { return Promise.resolve(true); }; this.toJSON = function() { return {}; }; }"
+    },
+    {
+      "target": "Clipboard",
+      "kind": "value",
+      "value": "function Clipboard() { this.read = function() { return Promise.resolve([]); }; this.readText = function() { return Promise.resolve(''); }; this.write = function() { return Promise.resolve(); }; this.writeText = function() { return Promise.resolve(); }; }"
+    },
+    {
+      "target": "ClipboardItem",
+      "kind": "value",
+      "value": "function ClipboardItem() {}"
+    },
+    {
+      "target": "PaymentRequest",
+      "kind": "value",
+      "value": "function PaymentRequest() {}"
+    },
+    {
+      "target": "showDirectoryPicker",
+      "kind": "function",
+      "value": "return Promise.reject(new Error('Not allowed'));"
+    },
+    {
+      "target": "showOpenFilePicker",
+      "kind": "function",
+      "value": "return Promise.reject(new Error('Not allowed'));"
+    },
+    {
+      "target": "showSaveFilePicker",
+      "kind": "function",
+      "value": "return Promise.reject(new Error('Not allowed'));"
+    },
+    {
+      "target": "FileSystemDirectoryHandle",
+      "kind": "value",
+      "value": "function FileSystemDirectoryHandle() {}"
+    },
+    {
+      "target": "SpeechRecognition",
+      "kind": "value",
+      "value": "function SpeechRecognition() { this.start = function() {}; this.stop = function() {}; this.abort = function() {}; this.onaudiostart = null; this.onaudioend = null; this.onend = null; this.onerror = null; this.onnomatch = null; this.onresult = null; this.onsoundstart = null; this.onsoundend = null; this.onspeechstart = null; this.onspeechend = null; this.onstart = null; this.continuous = false; this.interimResults = false; this.lang = 'en-US'; this.maxAlternatives = 1; this.serviceURI = ''; this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; }"
+    },
+    {
+      "target": "webkitSpeechRecognition",
+      "kind": "value",
+      "value": "function webkitSpeechRecognition() { return new SpeechRecognition(); }"
+    },
+    {
+      "target": "Accelerometer",
+      "kind": "value",
+      "value": "function Accelerometer() { this.x = 0; this.y = 0; this.z = 0; this.addEventListener = function() {}; this.removeEventListener = function() {}; this.start = function() {}; this.stop = function() {}; }"
+    },
+    {
+      "target": "Gyroscope",
+      "kind": "value",
+      "value": "function Gyroscope() { this.x = 0; this.y = 0; this.z = 0; this.addEventListener = function() {}; this.removeEventListener = function() {}; this.start = function() {}; this.stop = function() {}; }"
+    },
+    {
+      "target": "LinearAccelerationSensor",
+      "kind": "value",
+      "value": "function LinearAccelerationSensor() { this.x = 0; this.y = 0; this.z = 0; this.addEventListener = function() {}; this.removeEventListener = function() {}; }"
+    },
+    {
+      "target": "AbsoluteOrientationSensor",
+      "kind": "value",
+      "value": "function AbsoluteOrientationSensor() { this.quaternion = [0, 0, 0, 1]; this.addEventListener = function() {}; this.removeEventListener = function() {}; }"
+    },
+    {
+      "target": "Magnetometer",
+      "kind": "value",
+      "value": "function Magnetometer() { this.x = 0; this.y = 0; this.z = 0; this.addEventListener = function() {}; this.removeEventListener = function() {}; }"
+    },
+    {
+      "target": "AmbientLightSensor",
+      "kind": "value",
+      "value": "function AmbientLightSensor() { this.illuminance = 100; this.addEventListener = function() {}; this.removeEventListener = function() {}; }"
+    },
+    {
+      "target": "VideoEncoder",
+      "kind": "value",
+      "value": "function VideoEncoder() { this.configure = function() {}; this.encode = function() {}; this.flush = function() { return Promise.resolve(); }; this.close = function() {}; this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; this.state = 'unconfigured'; this.encodeQueueSize = 0; this.isConfigSupported = function() { return Promise.resolve({ supported: false }); }; }"
+    },
+    {
+      "target": "VideoDecoder",
+      "kind": "value",
+      "value": "function VideoDecoder() { this.configure = function() {}; this.decode = function() {}; this.flush = function() { return Promise.resolve(); }; this.close = function() {}; this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; this.state = 'unconfigured'; this.decodeQueueSize = 0; this.isConfigSupported = function() { return Promise.resolve({ supported: false }); }; }"
+    },
+    {
+      "target": "AudioEncoder",
+      "kind": "value",
+      "value": "function AudioEncoder() { this.configure = function() {}; this.encode = function() {}; this.flush = function() { return Promise.resolve(); }; this.close = function() {}; this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; this.state = 'unconfigured'; this.encodeQueueSize = 0; this.isConfigSupported = function() { return Promise.resolve({ supported: false }); }; }"
+    },
+    {
+      "target": "AudioDecoder",
+      "kind": "value",
+      "value": "function AudioDecoder() { this.configure = function() {}; this.decode = function() {}; this.flush = function() { return Promise.resolve(); }; this.close = function() {}; this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; this.state = 'unconfigured'; this.decodeQueueSize = 0; this.isConfigSupported = function() { return Promise.resolve({ supported: false }); }; }"
+    },
+    {
+      "target": "ImageDecoder",
+      "kind": "value",
+      "value": "function ImageDecoder() { this.decode = function() { return Promise.resolve({ image: { close: function() {} } }); }; this.close = function() {}; this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; this.completed = Promise.resolve(); this.tracks = []; this.type = ''; }"
+    },
+    {
+      "target": "VideoFrame",
+      "kind": "value",
+      "value": "function VideoFrame() { this.close = function() {}; this.allocationSize = function() { return 0; }; this.copyTo = function() { return Promise.resolve([]); }; this.timestamp = 0; this.displayWidth = 0; this.displayHeight = 0; }"
+    },
+    {
+      "target": "MediaSource",
+      "kind": "value",
+      "value": "function MediaSource() { this.readyState = 'closed'; this.endOfStream = function() {}; this.addSourceBuffer = function() { return { appendBuffer: function() {}, remove: function() {}, abort: function() {}, addEventListener: function() {}, removeEventListener: function() {} }; }; this.activeSourceBuffers = []; this.sourceBuffers = []; this.duration = NaN; this.currentTime = 0; this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; this.isTypeSupported = function() { return false; }; }"
+    },
+    {
+      "target": "SourceBuffer",
+      "kind": "value",
+      "value": "function SourceBuffer() { this.appendBuffer = function() {}; this.remove = function() {}; this.abort = function() {}; this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; this.updating = false; this.buffered = { start: function() { return 0; }, end: function() { return 0; }, length: 0 }; }"
+    },
+    {
+      "target": "ReadableStream",
+      "kind": "native_register"
+    },
+    {
+      "target": "WritableStream",
+      "kind": "native_register"
+    },
+    {
+      "target": "TransformStream",
+      "kind": "native_register"
+    },
+    {
+      "target": "CompressionStream",
+      "kind": "value",
+      "value": "function CompressionStream() {}"
+    },
+    {
+      "target": "DecompressionStream",
+      "kind": "value",
+      "value": "function DecompressionStream() {}"
+    },
+    {
+      "target": "MediaSession",
+      "kind": "value",
+      "value": "function MediaSession() { this.metadata = null; this.playbackState = 'none'; this.setActionHandler = function() {}; this.setPositionState = function() {}; this.coordinates = null; this.addEventListener = function() {}; this.removeEventListener = function() {}; }"
+    },
+    {
+      "target": "Gamepad",
+      "kind": "value",
+      "value": "function Gamepad() { this.id = ''; this.index = 0; this.mapping = ''; this.connected = false; this.timestamp = 0; this.axes = []; this.buttons = []; this.vibrationActuator = null; this.addEventListener = function() {}; this.removeEventListener = function() {}; }"
+    },
+    {
+      "target": "WebTransport",
+      "kind": "value",
+      "value": "function WebTransport() { this.ready = Promise.reject(new Error('Not supported')); this.closed = Promise.reject(new Error('Not supported')); this.draining = Promise.resolve(); this.createBidirectionalStream = function() { return Promise.reject(new Error('Not supported')); }; this.createUnidirectionalStream = function() { return Promise.reject(new Error('Not supported')); }; this.close = function() {}; this.getStats = function() { return Promise.resolve({}); }; this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; }"
+    },
+    {
+      "target": "history.pushState",
+      "kind": "function",
+      "value": "return _orig_1.apply(this, arguments);"
+    },
+    {
+      "target": "history.replaceState",
+      "kind": "function",
+      "value": "return _orig_1.apply(this, arguments);"
+    },
+    {
+      "target": "File",
+      "kind": "value",
+      "value": {
+        "name": "",
+        "size": 0,
+        "type": "",
+        "lastModified": 1700000000000,
+        "webkitRelativePath": ""
+      }
+    },
+    {
+      "target": "FileReader",
+      "kind": "native_register"
+    },
+    {
+      "target": "WebSocket",
+      "kind": "native_register"
+    },
+    {
+      "target": "fetch",
+      "kind": "native_register"
+    },
+    {
+      "target": "TextEncoder",
+      "kind": "native_register"
+    },
+    {
+      "target": "TextDecoder",
+      "kind": "native_register"
+    },
+    {
+      "target": "URLSearchParams",
+      "kind": "native_register"
+    },
+    {
+      "target": "WebGLRenderingContext.prototype.getExtension",
+      "kind": "function",
+      "implementation": "const _name = arguments[0]; if (_name === 'WEBGL_debug_renderer_info') return { UNMASKED_VENDOR_WEBGL: 0x9245, UNMASKED_RENDERER_WEBGL: 0x9246 }; return _orig_599.apply(this, arguments);"
+    },
+    {
+      "target": "WebGL2RenderingContext.prototype.getExtension",
+      "kind": "function",
+      "implementation": "const _name = arguments[0]; if (_name === 'WEBGL_debug_renderer_info') return { UNMASKED_VENDOR_WEBGL: 0x9245, UNMASKED_RENDERER_WEBGL: 0x9246 }; return _orig_600.apply(this, arguments);"
+    },
+    {
+      "target": "performance.timeOrigin",
+      "kind": "value",
+      "value": 1700000000000
+    },
+    {
+      "target": "BatteryManager",
+      "kind": "value",
+      "value": {
+        "charging": true,
+        "chargingTime": 0,
+        "dischargingTime": 99999,
+        "level": 0.99,
+        "addEventListener": "function() {}",
+        "removeEventListener": "function() {}",
+        "dispatchEvent": "function() { return true; }"
+      }
+    },
+    {
+      "target": "CSS",
+      "kind": "value",
+      "value": {
+        "supports": "function() { return true; }",
+        "escape": "function(s) { return String(s).replace(/[^a-zA-Z0-9_-]/g, function(c) { return \"\\\\\" + c.charCodeAt(0).toString(16) + \" \"; }); }",
+        "skewX": "function() {}",
+        "skewY": "function() {}",
+        "rotate": "function() {}",
+        "scale": "function() {}",
+        "translate": "function() {}",
+        "matrix": "function() {}",
+        "matrix3d": "function() {}",
+        "perspective": "function() {}",
+        "rgb": "function(r, g, b) { return \"rgb(\" + r + \", \" + g + \", \" + b + \")\"; }",
+        "rgba": "function(r, g, b, a) { return \"rgba(\" + r + \", \" + g + \", \" + b + \", \" + a + \")\"; }",
+        "hsl": "function(h, s, l) { return \"hsl(\" + h + \", \" + s + \"%, \" + l + \"%)\"; }",
+        "hsla": "function(h, s, l, a) { return \"hsla(\" + h + \", \" + s + \"%, \" + l + \"%, \" + a + \")\"; }",
+        "color": "function() {}",
+        "calc": "function() {}",
+        "clamp": "function() {}",
+        "min": "function() {}",
+        "max": "function() {}",
+        "sin": "function() {}",
+        "cos": "function() {}",
+        "tan": "function() {}",
+        "asin": "function() {}",
+        "acos": "function() {}",
+        "atan": "function() {}",
+        "atan2": "function() {}",
+        "pow": "function() {}",
+        "sqrt": "function() {}",
+        "hypot": "function() {}",
+        "log": "function() {}",
+        "exp": "function() {}",
+        "round": "function() {}",
+        "mod": "function() {}",
+        "rem": "function() {}",
+        "sign": "function() {}",
+        "abs": "function() {}"
+      }
+    },
+    {
+      "target": "CSSStyleSheet",
+      "kind": "value",
+      "value": {
+        "insertRule": "function() { return -1; }",
+        "deleteRule": "function() {}",
+        "addRule": "function() { return -1; }",
+        "removeRule": "function() {}",
+        "cssRules": [],
+        "ownerRule": null,
+        "href": "",
+        "title": "",
+        "type": "text/css",
+        "disabled": false,
+        "parentStyleSheet": null,
+        "addEventListener": "function() {}",
+        "removeEventListener": "function() {}",
+        "dispatchEvent": "function() { return true; }"
+      }
+    },
+    {
+      "target": "CSSRule",
+      "kind": "value",
+      "value": {
+        "type": 1,
+        "cssText": "",
+        "parentRule": null,
+        "parentStyleSheet": null
+      }
+    },
+    {
+      "target": "CSSStyleRule",
+      "kind": "value",
+      "value": {
+        "type": 1,
+        "selectorText": "",
+        "style": {}
+      }
+    },
+    {
+      "target": "CSSMediaRule",
+      "kind": "value",
+      "value": {
+        "type": 4,
+        "media": {},
+        "conditionText": "",
+        "cssRules": []
+      }
+    },
+    {
+      "target": "CSSKeyframesRule",
+      "kind": "value",
+      "value": {
+        "type": 7,
+        "name": "",
+        "cssRules": [],
+        "appendRule": "function() {}",
+        "deleteRule": "function() {}",
+        "findRule": "function() { return null; }"
+      }
+    },
+    {
+      "target": "CSSSupportsRule",
+      "kind": "value",
+      "value": {
+        "type": 12,
+        "conditionText": "",
+        "cssRules": []
+      }
+    },
+    {
+      "target": "CSSConditionRule",
+      "kind": "value",
+      "value": {
+        "type": 4,
+        "conditionText": "",
+        "cssRules": []
+      }
+    },
+    {
+      "target": "CSSStyleDeclaration",
+      "kind": "value",
+      "value": {
+        "getPropertyValue": "function() { return \"\"; }",
+        "getPropertyPriority": "function() { return \"\"; }",
+        "setProperty": "function() {}",
+        "removeProperty": "function() { return \"\"; }",
+        "item": "function() { return \"\"; }",
+        "cssText": "",
+        "length": 0,
+        "parentRule": null
+      }
+    },
+    {
+      "target": "ShadowRoot",
+      "kind": "value",
+      "value": {
+        "mode": "open",
+        "host": null,
+        "innerHTML": "",
+        "activeElement": null,
+        "styleSheets": [],
+        "getSelection": "function() { return null; }",
+        "elementFromPoint": "function() { return null; }",
+        "elementsFromPoint": "function() { return []; }",
+        "caretPositionFromPoint": "function() { return null; }",
+        "children": [],
+        "firstElementChild": null,
+        "lastElementChild": null,
+        "childElementCount": 0,
+        "addEventListener": "function() {}",
+        "removeEventListener": "function() {}",
+        "dispatchEvent": "function() { return true; }",
+        "getAnimations": "function() { return []; }",
+        "querySelector": "function() { return null; }",
+        "querySelectorAll": "function() { return []; }",
+        "getElementById": "function() { return null; }"
+      }
+    },
+    {
+      "target": "Range",
+      "kind": "native_register"
+    },
+    {
+      "target": "Selection",
+      "kind": "value",
+      "value": {
+        "anchorNode": null,
+        "anchorOffset": 0,
+        "focusNode": null,
+        "focusOffset": 0,
+        "isCollapsed": true,
+        "rangeCount": 0,
+        "type": "None",
+        "addRange": "function() {}",
+        "removeRange": "function() {}",
+        "removeAllRanges": "function() {}",
+        "collapse": "function() {}",
+        "collapseToStart": "function() {}",
+        "collapseToEnd": "function() {}",
+        "extend": "function() {}",
+        "selectAllChildren": "function() {}",
+        "toString": "function() { return \"\"; }",
+        "containsNode": "function() { return false; }",
+        "getRangeAt": "function() { return null; }",
+        "modify": "function() {}",
+        "setBaseAndExtent": "function() {}",
+        "setPosition": "function() {}",
+        "empty": "function() {}"
+      }
+    },
+    {
+      "target": "Animation",
+      "kind": "value",
+      "value": {
+        "playState": "idle",
+        "currentTime": 0,
+        "startTime": 0,
+        "pending": false,
+        "playbackRate": 1,
+        "timeline": null,
+        "effect": null,
+        "id": "",
+        "cancel": "function() {}",
+        "finish": "function() { return Promise.resolve(); }",
+        "play": "function() {}",
+        "pause": "function() {}",
+        "reverse": "function() {}",
+        "updatePlaybackRate": "function() {}",
+        "persist": "function() {}",
+        "commitStyles": "function() {}",
+        "addEventListener": "function() {}",
+        "removeEventListener": "function() {}",
+        "dispatchEvent": "function() { return true; }",
+        "oncancel": null,
+        "onfinish": null,
+        "onremove": null,
+        "ready": "Promise.resolve()",
+        "finished": "Promise.resolve()"
+      }
+    },
+    {
+      "target": "KeyframeEffect",
+      "kind": "value",
+      "value": {
+        "target": null,
+        "pseudoElement": null,
+        "iterationComposite": "replace",
+        "composite": "replace",
+        "getKeyframes": "function() { return []; }",
+        "setKeyframes": "function() {}",
+        "getComputedTiming": "function() { return {}; }",
+        "updateTiming": "function() {}",
+        "addEventListener": "function() {}",
+        "removeEventListener": "function() {}",
+        "dispatchEvent": "function() { return true; }"
+      }
+    },
+    {
+      "target": "AnimationEffect",
+      "kind": "value",
+      "value": {
+        "getTiming": "function() { return {}; }",
+        "getComputedTiming": "function() { return {}; }",
+        "updateTiming": "function() {}"
+      }
+    },
+    {
+      "target": "DocumentTimeline",
+      "kind": "value",
+      "value": {
+        "currentTime": 0
+      }
+    },
+    {
+      "target": "DragEvent",
+      "kind": "value",
+      "value": {
+        "dataTransfer": null
+      }
+    },
+    {
+      "target": "DataTransfer",
+      "kind": "value",
+      "value": {
+        "dropEffect": "none",
+        "effectAllowed": "none",
+        "files": [],
+        "items": [],
+        "types": [],
+        "getData": "function() { return \"\"; }",
+        "setData": "function() {}",
+        "clearData": "function() {}",
+        "setDragImage": "function() {}",
+        "addElement": "function() {}"
+      }
+    },
+    {
+      "target": "DataTransferItem",
+      "kind": "value",
+      "value": {
+        "kind": "string",
+        "type": "text/plain",
+        "getAsString": "function() {}",
+        "getAsFile": "function() { return null; }",
+        "webkitGetAsEntry": "function() { return null; }"
+      }
+    },
+    {
+      "target": "DataTransferItemList",
+      "kind": "value",
+      "value": {
+        "length": 0,
+        "add": "function() {}",
+        "remove": "function() {}",
+        "clear": "function() {}"
+      }
+    },
+    {
+      "target": "BigInt64Array",
+      "kind": "native_register"
+    },
+    {
+      "target": "BigUint64Array",
+      "kind": "native_register"
+    },
+    {
+      "target": "Float32Array",
+      "kind": "native_register"
+    },
+    {
+      "target": "Float64Array",
+      "kind": "native_register"
+    },
+    {
+      "target": "Int8Array",
+      "kind": "native_register"
+    },
+    {
+      "target": "Int16Array",
+      "kind": "native_register"
+    },
+    {
+      "target": "Int32Array",
+      "kind": "native_register"
+    },
+    {
+      "target": "Uint8Array",
+      "kind": "native_register"
+    },
+    {
+      "target": "Uint8ClampedArray",
+      "kind": "native_register"
+    },
+    {
+      "target": "Uint16Array",
+      "kind": "native_register"
+    },
+    {
+      "target": "Uint32Array",
+      "kind": "native_register"
+    },
+    {
+      "target": "DataView",
+      "kind": "native_register"
+    },
+    {
+      "target": "ArrayBuffer",
+      "kind": "native_register"
+    },
+    {
+      "target": "PublicKeyCredential",
+      "kind": "value",
+      "value": {
+        "type": "public-key",
+        "id": "",
+        "rawId": "",
+        "response": {},
+        "getClientExtensionResults": "function() { return {}; }",
+        "toJSON": "function() { return {}; }",
+        "isConditionalMediationAvailable": "function() { return Promise.resolve(false); }",
+        "preventSilentAccess": "function() { return Promise.resolve(); }",
+        "signalAllAcceptedCredentials": "function() { return Promise.resolve(); }",
+        "signalCurrentUserDetails": "function() { return Promise.resolve(); }",
+        "signalUnknownCredential": "function() { return Promise.resolve(); }"
+      }
+    },
+    {
+      "target": "OTPCredential",
+      "kind": "value",
+      "value": {
+        "code": ""
+      }
+    },
+    {
+      "target": "FederatedCredential",
+      "kind": "value",
+      "value": {
+        "provider": "",
+        "protocol": "",
+        "name": "",
+        "iconURL": "",
+        "origin": ""
+      }
+    },
+    {
+      "target": "PasswordCredential",
+      "kind": "value",
+      "value": {
+        "id": "",
+        "name": "",
+        "iconURL": "",
+        "password": ""
+      }
+    },
+    {
+      "target": "navigator.serviceWorker",
+      "kind": "value",
+      "value": {
+        "register": "function() { return Promise.reject(new Error(\"Not allowed\")); }",
+        "getRegistration": "function() { return Promise.resolve(undefined); }",
+        "getRegistrations": "function() { return Promise.resolve([]); }",
+        "addEventListener": "function() {}",
+        "removeEventListener": "function() {}",
+        "dispatchEvent": "function() { return true; }",
+        "ready": "Promise.resolve(undefined)",
+        "controller": null,
+        "oncontrollerchange": null,
+        "onmessage": null,
+        "onmessageerror": null
+      }
+    },
+    {
+      "target": "History.prototype.pushState",
+      "kind": "native_register"
+    },
+    {
+      "target": "History.prototype.replaceState",
+      "kind": "native_register"
+    },
+    {
+      "target": "History.prototype.back",
+      "kind": "native_register"
+    },
+    {
+      "target": "History.prototype.forward",
+      "kind": "native_register"
+    },
+    {
+      "target": "History.prototype.go",
+      "kind": "native_register"
+    },
+    {
+      "target": "history.length",
+      "kind": "value",
+      "value": 1
+    },
+    {
+      "target": "history.state",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "history.scrollRestoration",
+      "kind": "value",
+      "value": "auto"
+    },
+    {
+      "target": "location.hash",
+      "kind": "value",
+      "value": ""
+    },
+    {
+      "target": "location.host",
+      "kind": "value",
+      "value": "localhost"
+    },
+    {
+      "target": "location.hostname",
+      "kind": "value",
+      "value": "localhost"
+    },
+    {
+      "target": "location.href",
+      "kind": "value",
+      "value": "about:blank"
+    },
+    {
+      "target": "location.origin",
+      "kind": "value",
+      "value": "null"
+    },
+    {
+      "target": "location.pathname",
+      "kind": "value",
+      "value": "/"
+    },
+    {
+      "target": "location.port",
+      "kind": "value",
+      "value": ""
+    },
+    {
+      "target": "location.protocol",
+      "kind": "value",
+      "value": "about:"
+    },
+    {
+      "target": "location.search",
+      "kind": "value",
+      "value": ""
+    },
+    {
+      "target": "document.cookie",
+      "kind": "value",
+      "value": ""
+    },
+    {
+      "target": "window.trustedTypes",
+      "kind": "value",
+      "value": {
+        "createPolicy": "function() { return { createHTML: function(s) { return s; }, createScriptURL: function(s) { return s; }, createScript: function(s) { return s; }, name: \"default\" }; }",
+        "emptyHTML": "",
+        "getAttributeType": "function() { return null; }",
+        "getTypeAttribute": "function() { return null; }",
+        "isHTML": "function() { return false; }",
+        "isScript": "function() { return false; }",
+        "isScriptURL": "function() { return false; }"
+      }
+    },
+    {
+      "target": "AudioParam",
+      "kind": "value",
+      "value": "function() { this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; this.connect = function() { return null; }; this.disconnect = function() {}; this.start = function() {}; this.stop = function() {}; this.cancelScheduledValues = function() {}; this.setValueAtTime = function() {}; this.linearRampToValueAtTime = function() {}; this.exponentialRampToValueAtTime = function() {}; this.setTargetAtTime = function() {}; this.setValueCurveAtTime = function() {}; }"
+    },
+    {
+      "target": "AudioListener",
+      "kind": "value",
+      "value": "function() { this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; this.connect = function() { return null; }; this.disconnect = function() {}; this.start = function() {}; this.stop = function() {}; this.cancelScheduledValues = function() {}; this.setValueAtTime = function() {}; this.linearRampToValueAtTime = function() {}; this.exponentialRampToValueAtTime = function() {}; this.setTargetAtTime = function() {}; this.setValueCurveAtTime = function() {}; }"
+    },
+    {
+      "target": "AudioBuffer",
+      "kind": "value",
+      "value": "function() { this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; this.connect = function() { return null; }; this.disconnect = function() {}; this.start = function() {}; this.stop = function() {}; this.cancelScheduledValues = function() {}; this.setValueAtTime = function() {}; this.linearRampToValueAtTime = function() {}; this.exponentialRampToValueAtTime = function() {}; this.setTargetAtTime = function() {}; this.setValueCurveAtTime = function() {}; }"
+    },
+    {
+      "target": "AudioBufferSourceNode",
+      "kind": "value",
+      "value": "function() { this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; this.connect = function() { return null; }; this.disconnect = function() {}; this.start = function() {}; this.stop = function() {}; this.cancelScheduledValues = function() {}; this.setValueAtTime = function() {}; this.linearRampToValueAtTime = function() {}; this.exponentialRampToValueAtTime = function() {}; this.setTargetAtTime = function() {}; this.setValueCurveAtTime = function() {}; }"
+    },
+    {
+      "target": "GainNode",
+      "kind": "value",
+      "value": "function() { this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; this.connect = function() { return null; }; this.disconnect = function() {}; this.start = function() {}; this.stop = function() {}; this.cancelScheduledValues = function() {}; this.setValueAtTime = function() {}; this.linearRampToValueAtTime = function() {}; this.exponentialRampToValueAtTime = function() {}; this.setTargetAtTime = function() {}; this.setValueCurveAtTime = function() {}; }"
+    },
+    {
+      "target": "BiquadFilterNode",
+      "kind": "value",
+      "value": "function() { this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; this.connect = function() { return null; }; this.disconnect = function() {}; this.start = function() {}; this.stop = function() {}; this.cancelScheduledValues = function() {}; this.setValueAtTime = function() {}; this.linearRampToValueAtTime = function() {}; this.exponentialRampToValueAtTime = function() {}; this.setTargetAtTime = function() {}; this.setValueCurveAtTime = function() {}; }"
+    },
+    {
+      "target": "DelayNode",
+      "kind": "value",
+      "value": "function() { this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; this.connect = function() { return null; }; this.disconnect = function() {}; this.start = function() {}; this.stop = function() {}; this.cancelScheduledValues = function() {}; this.setValueAtTime = function() {}; this.linearRampToValueAtTime = function() {}; this.exponentialRampToValueAtTime = function() {}; this.setTargetAtTime = function() {}; this.setValueCurveAtTime = function() {}; }"
+    },
+    {
+      "target": "ConvolverNode",
+      "kind": "value",
+      "value": "function() { this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; this.connect = function() { return null; }; this.disconnect = function() {}; this.start = function() {}; this.stop = function() {}; this.cancelScheduledValues = function() {}; this.setValueAtTime = function() {}; this.linearRampToValueAtTime = function() {}; this.exponentialRampToValueAtTime = function() {}; this.setTargetAtTime = function() {}; this.setValueCurveAtTime = function() {}; }"
+    },
+    {
+      "target": "AnalyserNode",
+      "kind": "value",
+      "value": "function() { this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; this.connect = function() { return null; }; this.disconnect = function() {}; this.start = function() {}; this.stop = function() {}; this.cancelScheduledValues = function() {}; this.setValueAtTime = function() {}; this.linearRampToValueAtTime = function() {}; this.exponentialRampToValueAtTime = function() {}; this.setTargetAtTime = function() {}; this.setValueCurveAtTime = function() {}; }"
+    },
+    {
+      "target": "ChannelMergerNode",
+      "kind": "value",
+      "value": "function() { this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; this.connect = function() { return null; }; this.disconnect = function() {}; this.start = function() {}; this.stop = function() {}; this.cancelScheduledValues = function() {}; this.setValueAtTime = function() {}; this.linearRampToValueAtTime = function() {}; this.exponentialRampToValueAtTime = function() {}; this.setTargetAtTime = function() {}; this.setValueCurveAtTime = function() {}; }"
+    },
+    {
+      "target": "ChannelSplitterNode",
+      "kind": "value",
+      "value": "function() { this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; this.connect = function() { return null; }; this.disconnect = function() {}; this.start = function() {}; this.stop = function() {}; this.cancelScheduledValues = function() {}; this.setValueAtTime = function() {}; this.linearRampToValueAtTime = function() {}; this.exponentialRampToValueAtTime = function() {}; this.setTargetAtTime = function() {}; this.setValueCurveAtTime = function() {}; }"
+    },
+    {
+      "target": "MediaStreamAudioSourceNode",
+      "kind": "value",
+      "value": "function() { this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; this.connect = function() { return null; }; this.disconnect = function() {}; this.start = function() {}; this.stop = function() {}; this.cancelScheduledValues = function() {}; this.setValueAtTime = function() {}; this.linearRampToValueAtTime = function() {}; this.exponentialRampToValueAtTime = function() {}; this.setTargetAtTime = function() {}; this.setValueCurveAtTime = function() {}; }"
+    },
+    {
+      "target": "MediaStreamAudioDestinationNode",
+      "kind": "value",
+      "value": "function() { this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; this.connect = function() { return null; }; this.disconnect = function() {}; this.start = function() {}; this.stop = function() {}; this.cancelScheduledValues = function() {}; this.setValueAtTime = function() {}; this.linearRampToValueAtTime = function() {}; this.exponentialRampToValueAtTime = function() {}; this.setTargetAtTime = function() {}; this.setValueCurveAtTime = function() {}; }"
+    },
+    {
+      "target": "PannerNode",
+      "kind": "value",
+      "value": "function() { this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; this.connect = function() { return null; }; this.disconnect = function() {}; this.start = function() {}; this.stop = function() {}; this.cancelScheduledValues = function() {}; this.setValueAtTime = function() {}; this.linearRampToValueAtTime = function() {}; this.exponentialRampToValueAtTime = function() {}; this.setTargetAtTime = function() {}; this.setValueCurveAtTime = function() {}; }"
+    },
+    {
+      "target": "PeriodicWave",
+      "kind": "value",
+      "value": "function() { this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; this.connect = function() { return null; }; this.disconnect = function() {}; this.start = function() {}; this.stop = function() {}; this.cancelScheduledValues = function() {}; this.setValueAtTime = function() {}; this.linearRampToValueAtTime = function() {}; this.exponentialRampToValueAtTime = function() {}; this.setTargetAtTime = function() {}; this.setValueCurveAtTime = function() {}; }"
+    },
+    {
+      "target": "OscillatorNode",
+      "kind": "value",
+      "value": "function() { this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; this.connect = function() { return null; }; this.disconnect = function() {}; this.start = function() {}; this.stop = function() {}; this.cancelScheduledValues = function() {}; this.setValueAtTime = function() {}; this.linearRampToValueAtTime = function() {}; this.exponentialRampToValueAtTime = function() {}; this.setTargetAtTime = function() {}; this.setValueCurveAtTime = function() {}; }"
+    },
+    {
+      "target": "StereoPannerNode",
+      "kind": "value",
+      "value": "function() { this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; this.connect = function() { return null; }; this.disconnect = function() {}; this.start = function() {}; this.stop = function() {}; this.cancelScheduledValues = function() {}; this.setValueAtTime = function() {}; this.linearRampToValueAtTime = function() {}; this.exponentialRampToValueAtTime = function() {}; this.setTargetAtTime = function() {}; this.setValueCurveAtTime = function() {}; }"
+    },
+    {
+      "target": "DynamicsCompressorNode",
+      "kind": "value",
+      "value": "function() { this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; this.connect = function() { return null; }; this.disconnect = function() {}; this.start = function() {}; this.stop = function() {}; this.cancelScheduledValues = function() {}; this.setValueAtTime = function() {}; this.linearRampToValueAtTime = function() {}; this.exponentialRampToValueAtTime = function() {}; this.setTargetAtTime = function() {}; this.setValueCurveAtTime = function() {}; }"
+    },
+    {
+      "target": "ScriptProcessorNode",
+      "kind": "value",
+      "value": "function() { this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; this.connect = function() { return null; }; this.disconnect = function() {}; this.start = function() {}; this.stop = function() {}; this.cancelScheduledValues = function() {}; this.setValueAtTime = function() {}; this.linearRampToValueAtTime = function() {}; this.exponentialRampToValueAtTime = function() {}; this.setTargetAtTime = function() {}; this.setValueCurveAtTime = function() {}; }"
+    },
+    {
+      "target": "WaveShaperNode",
+      "kind": "value",
+      "value": "function() { this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; this.connect = function() { return null; }; this.disconnect = function() {}; this.start = function() {}; this.stop = function() {}; this.cancelScheduledValues = function() {}; this.setValueAtTime = function() {}; this.linearRampToValueAtTime = function() {}; this.exponentialRampToValueAtTime = function() {}; this.setTargetAtTime = function() {}; this.setValueCurveAtTime = function() {}; }"
+    },
+    {
+      "target": "IIRFilterNode",
+      "kind": "value",
+      "value": "function() { this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; this.connect = function() { return null; }; this.disconnect = function() {}; this.start = function() {}; this.stop = function() {}; this.cancelScheduledValues = function() {}; this.setValueAtTime = function() {}; this.linearRampToValueAtTime = function() {}; this.exponentialRampToValueAtTime = function() {}; this.setTargetAtTime = function() {}; this.setValueCurveAtTime = function() {}; }"
+    },
+    {
+      "target": "ConstantSourceNode",
+      "kind": "value",
+      "value": "function() { this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; this.connect = function() { return null; }; this.disconnect = function() {}; this.start = function() {}; this.stop = function() {}; this.cancelScheduledValues = function() {}; this.setValueAtTime = function() {}; this.linearRampToValueAtTime = function() {}; this.exponentialRampToValueAtTime = function() {}; this.setTargetAtTime = function() {}; this.setValueCurveAtTime = function() {}; }"
+    },
+    {
+      "target": "MediaElementAudioSourceNode",
+      "kind": "value",
+      "value": "function() { this.addEventListener = function() {}; this.removeEventListener = function() {}; this.dispatchEvent = function() { return true; }; this.connect = function() { return null; }; this.disconnect = function() {}; this.start = function() {}; this.stop = function() {}; this.cancelScheduledValues = function() {}; this.setValueAtTime = function() {}; this.linearRampToValueAtTime = function() {}; this.exponentialRampToValueAtTime = function() {}; this.setTargetAtTime = function() {}; this.setValueCurveAtTime = function() {}; }"
+    },
+    {
+      "target": "SpeechSynthesisUtterance",
+      "kind": "value",
+      "value": {
+        "text": "",
+        "lang": "en-US",
+        "voice": null,
+        "volume": 1,
+        "rate": 1,
+        "pitch": 1,
+        "onstart": null,
+        "onend": null,
+        "onerror": null,
+        "onpause": null,
+        "onresume": null,
+        "onmark": null,
+        "onboundary": null,
+        "addEventListener": "function() {}",
+        "removeEventListener": "function() {}",
+        "dispatchEvent": "function() { return true; }"
+      }
+    },
+    {
+      "target": "SpeechSynthesisEvent",
+      "kind": "value",
+      "value": {
+        "utterance": null,
+        "charIndex": 0,
+        "charLength": 0,
+        "elapsedTime": 0,
+        "name": ""
+      }
+    },
+    {
+      "target": "SpeechSynthesisErrorEvent",
+      "kind": "value",
+      "value": {
+        "error": "canceled"
+      }
+    },
+    {
+      "target": "SpeechSynthesisVoice",
+      "kind": "value",
+      "value": {
+        "voiceURI": "",
+        "name": "",
+        "lang": "en-US",
+        "localService": false,
+        "default": false
+      }
+    },
+    {
+      "target": "FileList",
+      "kind": "value",
+      "value": {
+        "length": 0,
+        "item": "function() { return null; }"
+      }
+    },
+    {
+      "target": "Blob.prototype.size",
+      "kind": "value",
+      "value": 0
+    },
+    {
+      "target": "Blob.prototype.type",
+      "kind": "value",
+      "value": ""
+    },
+    {
+      "target": "Permissions",
+      "kind": "value",
+      "value": {
+        "query": "function() { return Promise.resolve({ state: \"prompt\" }); }"
+      }
+    },
+    {
+      "target": "PerformanceNavigationTiming",
+      "kind": "value",
+      "value": {
+        "type": "navigate",
+        "redirectCount": 0,
+        "unloadEventStart": 0,
+        "unloadEventEnd": 0,
+        "domInteractive": 0,
+        "domContentLoadedEventStart": 0,
+        "domContentLoadedEventEnd": 0,
+        "domComplete": 0,
+        "loadEventStart": 0,
+        "loadEventEnd": 0,
+        "duration": 0,
+        "name": "",
+        "entryType": "navigation",
+        "startTime": 0,
+        "initiatorType": "navigation",
+        "nextHopProtocol": "h2",
+        "renderBlockingStatus": "non-blocking",
+        "responseStatus": 200,
+        "deliveryType": "",
+        "workerStart": 0,
+        "redirectStart": 0,
+        "redirectEnd": 0,
+        "fetchStart": 0,
+        "domainLookupStart": 0,
+        "domainLookupEnd": 0,
+        "connectStart": 0,
+        "secureConnectionStart": 0,
+        "connectEnd": 0,
+        "requestStart": 0,
+        "responseStart": 0,
+        "responseEnd": 0,
+        "transferSize": 0,
+        "encodedBodySize": 0,
+        "decodedBodySize": 0,
+        "serverTiming": [],
+        "toJSON": "function() { return {}; }",
+        "getEntries": "function() { return []; }",
+        "getEntriesByName": "function() { return []; }",
+        "getEntriesByType": "function() { return []; }"
+      }
+    },
+    {
+      "target": "PerformanceResourceTiming",
+      "kind": "value",
+      "value": {
+        "initiatorType": "script",
+        "nextHopProtocol": "h2",
+        "workerStart": 0,
+        "redirectStart": 0,
+        "redirectEnd": 0,
+        "fetchStart": 0,
+        "domainLookupStart": 0,
+        "domainLookupEnd": 0,
+        "connectStart": 0,
+        "secureConnectionStart": 0,
+        "connectEnd": 0,
+        "requestStart": 0,
+        "responseStart": 0,
+        "responseEnd": 0,
+        "transferSize": 0,
+        "encodedBodySize": 0,
+        "decodedBodySize": 0,
+        "serverTiming": [],
+        "renderBlockingStatus": "non-blocking",
+        "deliveryType": "",
+        "responseStatus": 200,
+        "name": "",
+        "entryType": "resource",
+        "startTime": 0,
+        "duration": 0,
+        "toJSON": "function() { return {}; }"
+      }
+    },
+    {
+      "target": "PerformanceMark",
+      "kind": "value",
+      "value": {
+        "name": "",
+        "entryType": "mark",
+        "startTime": 0,
+        "duration": 0,
+        "detail": null,
+        "toJSON": "function() { return {}; }"
+      }
+    },
+    {
+      "target": "PerformanceMeasure",
+      "kind": "value",
+      "value": {
+        "name": "",
+        "entryType": "measure",
+        "startTime": 0,
+        "duration": 0,
+        "detail": null,
+        "toJSON": "function() { return {}; }"
+      }
+    },
+    {
+      "target": "PerformancePaintTiming",
+      "kind": "value",
+      "value": {
+        "name": "",
+        "entryType": "paint",
+        "startTime": 0,
+        "duration": 0,
+        "toJSON": "function() { return {}; }"
+      }
+    },
+    {
+      "target": "PerformanceEventTiming",
+      "kind": "value",
+      "value": {
+        "name": "",
+        "entryType": "event",
+        "startTime": 0,
+        "duration": 0,
+        "processingStart": 0,
+        "processingEnd": 0,
+        "cancelable": true,
+        "toJSON": "function() { return {}; }"
+      }
+    },
+    {
+      "target": "PerformanceLongTaskTiming",
+      "kind": "value",
+      "value": {
+        "name": "",
+        "entryType": "longtask",
+        "startTime": 0,
+        "duration": 50,
+        "toJSON": "function() { return {}; }"
+      }
+    },
+    {
+      "target": "PerformanceElementTiming",
+      "kind": "value",
+      "value": {
+        "name": "",
+        "entryType": "element",
+        "startTime": 0,
+        "duration": 0,
+        "renderTime": 0,
+        "loadTime": 0,
+        "identifier": "",
+        "element": null,
+        "toJSON": "function() { return {}; }"
+      }
+    },
+    {
+      "target": "PerformanceNavigation.prototype.type",
+      "kind": "value",
+      "value": "navigate"
+    },
+    {
+      "target": "PerformanceNavigation.prototype.redirectCount",
+      "kind": "value",
+      "value": 0
+    },
+    {
+      "target": "StorageManager",
+      "kind": "value",
+      "value": {
+        "estimate": "function() { return Promise.resolve({ quota: 1000000000, usage: 0 }); }",
+        "persist": "function() { return Promise.resolve(true); }",
+        "persisted": "function() { return Promise.resolve(false); }",
+        "getDirectory": "function() { return Promise.reject(new Error(\"Not allowed\")); }"
+      }
+    },
+    {
+      "target": "document.__selenium_unwrapped",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "document.__webdriver_evaluate",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "document.__driver_evaluate",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "document.__webdriver_unwrap",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "document.__driver_unwrap",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "document.__webdriver_script_function",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "document.__webdriver_script_func",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "document.__webdriver_chrome_runtime",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "document.__fxdriver_evaluate",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "document.__fxdriver_unwrap",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "document.__lastWatirAlert",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "document.__lastWatirConfirm",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "document.__lastWatirPrompt",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.cdc_adoQpoasnfa76pfcZLmcfl_Array",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.cdc_adoQpoasnfa76pfcZLmcfl_Promise",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.cdc_adoQpoasnfa76pfcZLmcfl_Object",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__puppeteer_evaluation_script__",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__playwright_evaluation_script__",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__selenium_evaluation_script__",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__selenium_page_eval_hook__",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__selenium_evaluation_hook__",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window._phantom",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.phantom",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.callPhantom",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__nightmare",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.nightmare",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__zombie",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.zombie",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.casper",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__casper",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.slimer",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__slimer",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window._Selenium_IDE_Recorder",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "$chrome_asyncScript",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.domAutomation",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.domAutomationController",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.automation",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window._AutomationAgent",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "document.__cdp_sessions__",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "document.__cdp_session_id__",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__cdpDelegate",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__cdpSession",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__cdpTarget",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__cdpConnection",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__devtoolsAgent",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__devtoolsProtocol",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__devtoolsRunner",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__PUPPETEER__",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__puppeteer_evaluate__",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__puppeteer_navigation__",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__puppeteer_runtime_evaluate__",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__puppeteer_init_script__",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.puppeteer",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.puppeteerConfig",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__playwright",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__playwrightInit",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__playwright_evaluate__",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__playwright_navigation__",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__pwInitScripts__",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.playwright",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__stealth",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__stealthMode",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__anti_detect",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__antiDetect",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__antibot",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__cloaked",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.devtools",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__REACT_DEVTOOLS_GLOBAL_HOOK__",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "window.__REDUX_DEVTOOLS_EXTENSION__",
+      "kind": "value",
+      "value": null
+    },
+    {
+      "target": "Document.prototype.getAttribute",
+      "kind": "function",
+      "implementation": "const _n = arguments[0]; if (typeof _n === 'string' && (_n === 'webdriver' || _n === 'data-webdriver' || _n === 'data-selenium' || _n === 'selenium' || _n.indexOf('webdriver') !== -1 || _n.indexOf('selenium') !== -1)) { return null; } return _orig_772.apply(this, arguments);"
+    },
+    {
+      "target": "Document.prototype.hasAttribute",
+      "kind": "function",
+      "implementation": "const _n = arguments[0]; if (typeof _n === 'string' && (_n === 'webdriver' || _n === 'data-webdriver' || _n === 'data-selenium' || _n === 'selenium' || _n.indexOf('webdriver') !== -1 || _n.indexOf('selenium') !== -1)) { return false; } return _orig_773.apply(this, arguments);"
+    },
+    {
+      "target": "Date.prototype.toString",
+      "kind": "function",
+      "implementation": "const _d = _orig_774.call(this); const _tz = (typeof window !== 'undefined' && window.__cloak_persona_tz) || 'America/New_York'; const _abbr = { 'America/New_York': 'EST', 'America/Chicago': 'CST', 'America/Denver': 'MST', 'America/Los_Angeles': 'PST', 'Europe/London': 'GMT', 'Europe/Paris': 'CET', 'Europe/Berlin': 'CET', 'Asia/Tokyo': 'JST', 'Asia/Kolkata': 'IST', 'Asia/Shanghai': 'CST', 'Australia/Sydney': 'AEDT' }; const _name = { 'America/New_York': 'Eastern Standard Time', 'America/Chicago': 'Central Standard Time', 'America/Denver': 'Mountain Standard Time', 'America/Los_Angeles': 'Pacific Standard Time', 'Europe/London': 'Greenwich Mean Time', 'Europe/Paris': 'Central European Time', 'Europe/Berlin': 'Central European Time', 'Asia/Tokyo': 'Japan Standard Time', 'Asia/Kolkata': 'India Standard Time', 'Asia/Shanghai': 'China Standard Time', 'Australia/Sydney': 'Australian Eastern Daylight Time' }; const _offset = { 'America/New_York': '-0500', 'America/Chicago': '-0600', 'America/Denver': '-0700', 'America/Los_Angeles': '-0800', 'Europe/London': '+0000', 'Europe/Paris': '+0100', 'Europe/Berlin': '+0100', 'Asia/Tokyo': '+0900', 'Asia/Kolkata': '+0530', 'Asia/Shanghai': '+0800', 'Australia/Sydney': '+1100' }; const _abbr_str = _abbr[_tz] || 'EST'; const _name_str = _name[_tz] || 'Eastern Standard Time'; const _offset_str = _offset[_tz] || '-0500'; return _d.replace(/GMT[+-]\\d{4}.*$/, 'GMT' + _offset_str + ' (' + _name_str + ')');"
+    },
+    {
+      "target": "Date.prototype.toLocaleString",
+      "kind": "function",
+      "implementation": "const _opts = arguments[1] || {}; _opts.timeZone = (typeof window !== 'undefined' && window.__cloak_persona_tz) || 'America/New_York'; if (!_opts.locale) { _opts.locale = (typeof window !== 'undefined' && window.__cloak_persona_locale) || 'en-US'; } return _orig_775.call(this, _opts.locale, _opts);"
+    },
+    {
+      "target": "Date.prototype.toLocaleDateString",
+      "kind": "function",
+      "implementation": "const _opts = arguments[1] || {}; _opts.timeZone = (typeof window !== 'undefined' && window.__cloak_persona_tz) || 'America/New_York'; if (!_opts.locale) { _opts.locale = (typeof window !== 'undefined' && window.__cloak_persona_locale) || 'en-US'; } return _orig_776.call(this, _opts.locale, _opts);"
+    },
+    {
+      "target": "Date.prototype.toLocaleTimeString",
+      "kind": "function",
+      "implementation": "const _opts = arguments[1] || {}; _opts.timeZone = (typeof window !== 'undefined' && window.__cloak_persona_tz) || 'America/New_York'; if (!_opts.locale) { _opts.locale = (typeof window !== 'undefined' && window.__cloak_persona_locale) || 'en-US'; } return _orig_777.call(this, _opts.locale, _opts);"
+    },
+    {
+      "target": "Date.prototype.toISOString",
+      "kind": "native_register"
+    },
+    {
+      "target": "Date.prototype.toJSON",
+      "kind": "native_register"
+    },
+    {
+      "target": "navigator.connection.type",
+      "kind": "function",
+      "implementation": "return (typeof window !== 'undefined' && window.__cloak_persona_connection_type) || 'wifi';"
+    },
+    {
+      "target": "navigator.connection.effectiveType",
+      "kind": "function",
+      "implementation": "return (typeof window !== 'undefined' && window.__cloak_persona_connection_type) || '4g';"
+    },
+    {
+      "target": "navigator.connection.downlink",
+      "kind": "function",
+      "implementation": "return (typeof window !== 'undefined' && window.__cloak_persona_downlink) || 10;"
+    },
+    {
+      "target": "navigator.connection.rtt",
+      "kind": "function",
+      "implementation": "return (typeof window !== 'undefined' && window.__cloak_persona_rtt) || 50;"
+    },
+    {
+      "target": "navigator.connection.saveData",
+      "kind": "function",
+      "implementation": "return false;"
+    },
+    {
+      "target": "screen.orientation.angle",
+      "kind": "value",
+      "value": 0
+    },
+    {
+      "target": "window.innerWidth",
+      "kind": "value",
+      "value": 1920
+    },
+    {
+      "target": "window.innerHeight",
+      "kind": "value",
+      "value": 969
+    },
+    {
+      "target": "window.outerWidth",
+      "kind": "value",
+      "value": 1920
+    },
+    {
+      "target": "window.outerHeight",
+      "kind": "value",
+      "value": 1040
+    },
+    {
+      "target": "window.devicePixelRatio",
+      "kind": "value",
+      "value": 1
+    },
+    {
+      "target": "Notification.requestPermission",
+      "kind": "function",
+      "implementation": "return Promise.resolve('default');"
+    },
+    {
+      "target": "ServiceWorker.prototype.register",
+      "kind": "native_register"
+    },
+    {
+      "target": "ServiceWorker.prototype.unregister",
+      "kind": "native_register"
+    },
+    {
+      "target": "ServiceWorker.prototype.update",
+      "kind": "native_register"
+    },
+    {
+      "target": "Date.parse",
+      "kind": "native_register"
+    },
+    {
+      "target": "Date.UTC",
+      "kind": "native_register"
+    },
+    {
+      "target": "Date.prototype.getYear",
+      "kind": "native_register"
+    },
+    {
+      "target": "Date.prototype.valueOf",
+      "kind": "native_register"
+    }
+  ]
+}

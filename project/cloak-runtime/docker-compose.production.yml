@@ -1,0 +1,87 @@
+# docker-compose.production.yml - CloakBrowser + cloak-runtime
+#
+# Quick start:
+#   docker-compose -f docker-compose.production.yml up -d
+#
+# Then:
+#   - GUI:   open http://localhost:6080/vnc.html (password: cloak)
+#   - VNC:   connect localhost:5900 with any VNC client
+#   - CDP:   connect Playwright to ws://localhost:9222
+#   - Auto:  set DEMO=1 or CDP=1 to run something on startup
+#
+# With proxy:
+#   HTTP_PROXY=socks5://user:pass@host:1080 \
+#   docker-compose -f docker-compose.production.yml up -d
+
+version: '3.8'
+
+services:
+  cloak:
+    # Build from local Dockerfile.production (which extends cloakhq/cloakbrowser)
+    build:
+      context: .
+      dockerfile: Dockerfile.production
+    image: cloak-prod:latest
+    container_name: cloak-prod
+    ports:
+      - "5900:5900"    # VNC
+      - "6080:6080"    # noVNC (browser GUI)
+      - "9222:9222"    # CDP (Playwright/Puppeteer remote connection)
+    environment:
+      # Display
+      - RESOLUTION=1920x1080x24
+      - VNC_PASSWORD=cloak                # CHANGE in production
+      - VNC_PORT=5900
+      - NOVNC_PORT=6080
+      # Mode - set ONE of these:
+      - DEMO=0                            # 1 = auto-run python demo (visits CreepJS)
+      - DEMO_JS=0                         # 1 = auto-run JS demo
+      - INTERACTIVE=0                     # 1 = open Chromium in VNC window
+      - CDP=0                             # 1 = run cloakserve (CDP server)
+      - HEADLESS=0                        # 1 = headless mode for demos
+      # CloakBrowser
+      - CLOAKBROWSER_NO_SANDBOX=true
+      # Proxy (uncomment and set for production)
+      # - HTTP_PROXY=socks5://user:pass@host:1080
+      # - HTTPS_PROXY=socks5://user:pass@host:1080
+      # Persona (from cloak-runtime/manifests/)
+      - PERSONA=chrome-128-win
+    volumes:
+      # Persistent results and persona data
+      - cloak-data:/data
+      # Mount your main.py if you want it to run by default
+      # - ./my_app.py:/app/main.py:ro
+    # Chromium needs lots of shared memory
+    shm_size: '2gb'
+    # Resource limits (adjust as needed)
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2'
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:6080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # Optional: CI test runner - one-shot, runs demo and exits
+  cloak-tester:
+    build:
+      context: .
+      dockerfile: Dockerfile.production
+    image: cloak-prod:latest
+    container_name: cloak-tester
+    environment:
+      - DEMO=1
+      - HEADLESS=1
+      - PERSONA=chrome-128-win
+    volumes:
+      - test-results:/data
+    profiles: ["test"]  # Only starts with --profile test
+
+volumes:
+  cloak-data:
+  test-results:
