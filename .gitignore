@@ -1,13 +1,6 @@
-# Local / container scratch
-.local/
-home/
-.sudo_as_admin_successful
-
-# Python
+# Python byte-compiled caches
 __pycache__/
 *.py[cod]
-.venv/
-venv/
 
 # Node
 node_modules/
@@ -19,9 +12,6 @@ node_modules/
 *.key
 *.p12
 *.pfx
-
-# Backups
-*.bak
 
 # Databases
 *.db

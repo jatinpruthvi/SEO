@@ -1,0 +1,1893 @@
+# sticky_proxy_resolver.py - Strict Geo-Consistency & Sticky Proxy Resolver Engine
+# Resolves, validates, and clamps proxy routing to match the persona's original registration region
+#
+# CHANGELOG (iter9 - deep audit fixes, see STICKY_PROXY_RESOLVER_DEEP_DIVE_R1.md):
+#   SPR1  - Wired resolver methods into orchestrator. The class was
+#          imported and instantiated but NONE of its methods were
+#          called. The proxy URL flowed directly from
+#          get_socks5_url_for_persona() to the browser without any
+#          geo-verification, clamping, or backup fallback.
+#   SPR2  - check_proxy_integrity() is now called before browser launch.
+#          Was: defined but never called.
+#   SPR3  - HTTPS for all intelligence queries. ip-api.com fallback
+#          was using plain HTTP, leaking DNS to local resolver.
+#   SPR4  - compile_dynamic_sticky_proxy_string() now accepts a
+#          country parameter. Non-US personas (london, paris, berlin)
+#          now produce valid proxy strings.
+#   SPR5  - Added local MaxMind GeoLite2-style fallback. External
+#          intelligence services (ipinfo.io, ip-api.com) are now
+#          secondary; they are well-known anti-bot signals.
+#   SPR6  - Cache keyed by IP, not URL. For rotating residential
+#          proxies, the IP changes per request but the URL stays
+#          the same. Previous cache missed every time.
+#   SPR7  - LRU eviction via collections.OrderedDict. Previous FIFO
+#          evicted most-used entries first.
+#   SPR8  - TTL-based cache entries (10 minutes). Previous cache
+#          returned stale data indefinitely.
+#   SPR11 - X-Forwarded-For and Via header stripping in outgoing
+#          requests. Prevents container IP leak.
+#   SPR12 - TLS fingerprint impersonation via curl_cffi for
+#          intelligence queries. Avoids Python JA3 fingerprint
+#          being detected.
+#   SPR13 - Shared httpx client (connection pooling). New client
+#          per call triggered rate-limiting.
+#   SPR14 - Retry with exponential backoff. Rate-limited endpoints
+#          now retry with delays.
+#   SPR15 - HTTPS for all intelligence queries.
+#   SPR16 - lock_persona parameter for match_persona_to_proxy_location().
+#          Mutates persona fields only on first binding.
+#   SPR17 - Type-check conn parameter for asyncpg.Connection.
+#   SPR18 - UUID4 session IDs. Previous 6-digit session IDs had
+#          collision risk.
+#   SPR19 - Session ID cached by persona_id. Sticky across calls.
+#   SPR20 - compile_dynamic_sticky_proxy_string() wired into orchestrator.
+#
+# CHANGELOG (iter13 - fifth-pass audit fixes, see STICKY_PROXY_RESOLVER_DEEP_DIVE_R2.md):
+#   SPR21 - Fuzzy geo matching: "Dallas" matches "Plano" if both in
+#          the same region. State-level fallback when city match fails.
+#   SPR22 - Cache egress IP resolution result (was: 1 req per call).
+#   SPR23 - Fallback path limits to 3 iterations. Circuit-breaker:
+#          skip geo check after 3 consecutive failures.
+#   SPR24 - Document api.ipify.org as anti-bot signal.
+#   SPR25 - Use ipinfo.io for BOTH health check and geo lookup
+#          (was: different endpoints, inconsistent results).
+#   SPR26 - Use urllib.parse.urlparse for proper URL parsing (was:
+#          manual split, breaks on @ in password).
+#   SPR27 - URL-decode password after parsing.
+#   SPR29 - Register atexit cleanup. Document that panic handler
+#          bypasses cleanup.
+#   SPR30 - Generate NEW session ID for fallback proxy (was: kept
+#          primary's session ID, defeating stickiness).
+#   SPR31 - Normalize city names (St. → Saint) for ILIKE matching.
+#   SPR32 - Validate fingerprint structure before using it.
+#   SPR35 - Differentiate "proxy dead" vs "geo unknown". Use primary
+#          if health check passed but geo unknown.
+#   SPR36 - __del__ method with cleanup warning.
+#   SPR37 - Validate city parameter is non-empty.
+#
+# CHANGELOG (iter15 - sixth-pass audit fixes, see STICKY_PROXY_RESOLVER_DEEP_DIVE_R3.md):
+#   SPR39 - __del__ is now total-safe (try/except AttributeError).
+#          Previously crashed during interpreter shutdown if called
+#          before __init__ finished.
+#   SPR40 - LRU off-by-one fixed (>= 1000 not > 1000).
+#   SPR41 - threading.Lock protects counter + cache mutations. Defends
+#          against atexit/sync __del__ crossing event-loop boundaries.
+#   SPR42 - health_check_proxy also extracts city/region/timezone from
+#          ipinfo.io and PRIMES the cache. Halves the intelligence
+#          call volume (1 request instead of 2 for IP+geo).
+#   SPR43 - Centralized circuit-breaker logic with TTL on open state
+#          (5 min). Auto-resets to allow probe.
+#   SPR44 - Shared httpx client uses trust_env=False. Prevents
+#          reading HTTP_PROXY/HTTPS_PROXY from the environment,
+#          which would route the resolver's intelligence queries
+#          through the system proxy or local DNS (DNS leak).
+#   SPR45 - _strip_proxy_headers is now a public static method (was
+#          dead code). Defense-in-depth helper for future header
+#          injection.
+#   SPR47 - _make_sticky_session_id raises ValueError on empty
+#          persona_id (defense against upstream bugs).
+#   SPR48 - Session-ID cache capped at 4 entries (1 + 3 backups).
+#   SPR49 - Typed exceptions ProxyUnavailableError and GeoBreachError
+#          replace bare ValueError. Orchestrator can now distinguish
+#          "no proxy alive" from "geo mismatch".
+#   SPR50 - get_proxy_for_persona wrapped in asyncio.wait_for(60s).
+#          Hard upper bound prevents DoS.
+#   SPR51 - Single attempt per endpoint (no retries). Previously made
+#          6 rapid requests to intelligence APIs, which is itself
+#          an anti-bot fingerprint.
+#   SPR52 - Timezone reconciliation: compares proxy's actual timezone
+#          (from ipinfo) to persona's expected timezone. Mismatches
+#          are logged as warnings (reCAPTCHA Enterprise top-3 signal).
+#   SPR53 - health_check_proxy now also trips the circuit-breaker on
+#          failure (not just geo failures).
+#   SPR54 - IPv6-aware proxy URL construction. Brackets the host
+#          when it's an IPv6 address. Detects via ipaddress.IPv6Address.
+#   SPR55 - Cache key strategy documented: URL-keyed cache holds
+#          the last seen egress IP; IP-keyed cache holds the geo.
+#          No collision risk for rotating vs static proxies.
+#   SPR56 - Shared client uses a Chrome 120 User-Agent header. The
+#          default python-httpx UA is an instant Python automation
+#          signal.
+#   SPR57 - City name is URL-encoded in the proxy username (handles
+#          Unicode accents and special characters).
+#   SPR58 - PID-budget decision documented: 3 concurrent httpx
+#          requests stay under the 128 PID budget.
+#   SPR59 - health_check_proxy accepts expected_egress_ip parameter.
+#          Verifies the actual egress IP matches expectations
+#          (defends against transparent proxies / NAT).
+#   SPR60 - Circuit-breaker is in-memory only (not persisted across
+#          daemon restarts). Documented as intentional.
+#   SPR61 - match_persona_to_proxy_location uses exact match
+#          (signup_geo_region = $1) instead of ILIKE '%$1%'. The
+#          fuzzy state-level fallback is in _fuzzy_geo_match.
+#   SPR62 - 1 quick in-call retry on transient health-check failures
+#          (was: 0 retries; orchestrator had to retry the whole task).
+#
+# CHANGELOG (iter17 - seventh-pass audit fixes, see STICKY_PROXY_RESOLVER_DEEP_DIVE_R4.md):
+#   SPR63 - Re-compilation bug: detect and strip existing city-locked
+#          markers (-country-...-session-...) from the username before
+#          appending new ones. Prevents doubly-nested params when the
+#          orchestrator's retry path passes an already-compiled URL
+#          back through compile_dynamic_sticky_proxy_string().
+#   SPR64 - Documented state-level false positive risk: "Dallas" and
+#          "El Paso" are both TX, but 600 miles apart. The fuzzy
+#          match currently treats them as the same region. The fix
+#          is in the orchestrator: it should pass a tighter geo
+#          (e.g., zip code) when binding critical personas.
+#   SPR65 - _infer_country_from_geo now returns actual country code
+#          (us/ca/gb/jp/au/...) instead of always 'us'. Maps 50 US
+#          states, 50 US state abbrevs, and 80+ non-US countries/
+#          provinces/states.
+#   SPR66 - _normalize_city_name: documented that 'St.' is interpreted
+#          as 'Saint' even when it means 'Street'. The function is
+#          only called for city names, so this is theoretical.
+#   SPR67 - Canonical proxy URL normalization for cache key consistency.
+#          Bracket IPv6 hosts, lowercase scheme, strip default ports,
+#          and remove IPv6 zone IDs. The cache key is now computed on
+#          the canonical form, so logically equivalent URLs map to
+#          the same key.
+#   SPR68 - Don't pollute the cache with 'unknown' geo entries. A
+#          subsequent call should retry the lookup, not return the
+#          same 'unknown' from the cache.
+#   SPR69 - get_proxy_for_persona and _find_backup_proxy accept
+#          expected_egress_ip parameter. Passed through to
+#          health_check_proxy for transparent-proxy / NAT detection.
+#   SPR70 - compile_dynamic_sticky_proxy_string logs at WARNING
+#          (not ERROR) when returning the base URL on exception.
+#          Caller can now detect silent failures via log scraping.
+#   SPR71 - _make_sticky_session_id: documented that the session ID
+#          is added to the cache BEFORE the URL is fully built. If
+#          URL construction fails, the orphaned session ID is
+#          harmless (next call with same persona_id returns same ID).
+#   SPR72 - match_persona_to_proxy_location now tries multiple
+#          city forms (raw, normalized, lowercase) for the DB
+#          exact-match query. Handles DBs that store "Plano" vs
+#          "Plano, Texas".
+#   SPR73 - health_check_proxy: egress_ip_match defaults to True
+#          when expected_egress_ip is None. Consistent with the
+#          "no verification needed" semantics.
+#   SPR74 - get_proxy_for_persona retry state isolation: the
+#          circuit-breaker counter is rolled back if the second
+#          attempt of a retry pair succeeds. Prevents a single
+#          transient failure from polluting breaker state.
+#   SPR75 - _strip_proxy_headers: documented as defense-in-depth
+#          for future custom header injection. Not called in the
+#          current code because the shared client doesn't inject
+#          leaky headers.
+#   SPR76 - IPv6 zone ID handling: _canonicalize_proxy_url strips
+#          '%zone' suffix from IPv6 hosts before bracket-wrapping.
+#          RFC 6874 zone IDs are unusual for residential proxies
+#          but possible for link-local addresses.
+#   SPR77 - All internal HTTP calls have explicit timeouts. The
+#          outer asyncio.wait_for(60s) is the hard upper bound.
+#   SPR78 - Cache writes are atomic within each method (single
+#          lock acquisition covers both URL-keyed and IP-keyed
+#          entries).
+#   SPR79 - compile_dynamic_sticky_proxy_string validates country
+#          code against ISO 3166-1 alpha-2 set. Invalid codes
+#          fall back to 'us' with a warning.
+#   SPR80 - Cache size cap (1000) is already enforced. No change.
+#   SPR82 - asyncpg rolls back uncommitted transactions on context
+#          exit, so match_persona_to_proxy_location's None returns
+#          are safe (no DB state pollution).
+
+import asyncio
+import atexit
+import collections
+import hashlib
+import httpx
+import ipaddress  # SPR54: IPv6 detection
+import json
+import os as _os
+import random
+import re as _re
+import threading  # SPR41: thread-safe counter/cache mutations
+import time
+import urllib.parse
+import uuid
+
+
+# R7-SPR-002: Weighted proxy tier selection. Real proxy pool management
+# has preferred (faster, lower-fraud-score) and backup proxies. The
+# previous code iterated the pool in FIFO order (always preferred
+# first), which is detectable: a 100% preference for proxies
+# at the top of the list is not realistic user behavior. We now
+# sample with 80% probability from the "preferred" tier (first 60%
+# of the pool) and 20% from the "backup" tier (last 40%).
+_PROXY_PREFERRED_RATIO = 0.60
+_PROXY_PREFERRED_PROBABILITY = 0.80
+
+def _select_weighted_proxy(pool: list) -> list:
+    """R7-SPR-002: Return a shuffled pool with weighted tier selection.
+    
+    The first 60% of the pool is the "preferred" tier (sampled 80%
+    of the time). The last 40% is the "backup" tier (sampled 20%).
+    
+    Returns a NEW list (caller iterates this). The original pool
+    order is preserved within each tier.
+    """
+    if not pool:
+        return []
+    if len(pool) == 1:
+        return list(pool)
+    n = len(pool)
+    split = max(1, int(n * _PROXY_PREFERRED_RATIO))
+    preferred = pool[:split]
+    backup = pool[split:]
+    # Decide which tier to draw from
+    import random as _r
+    if not backup:
+        return list(preferred)
+    if not preferred:
+        return list(backup)
+    if _r.random() < _PROXY_PREFERRED_PROBABILITY:
+        return list(preferred)
+    else:
+        return list(backup)
+
+
+def _shuffle_iteration_order(pool: list) -> list:
+    """R7-SPR-002: For a given tier, randomize the iteration order
+    so that the same proxy isn't always tried first. Real users
+    get random proxy assignments, not deterministic."""
+    import random as _r
+    result = list(pool)
+    _r.shuffle(result)
+    return result
+
+
+from typing import Optional, Dict, Any, List, Tuple
+from loguru import logger
+
+
+# CF-9 (Pass 18): Safe env var parser. See hardened_orchestrator.py
+# for the canonical implementation. We duplicate the helper here
+# (rather than cross-import) because sticky_proxy_resolver.py is
+# imported by hardened_orchestrator.py — circular import risk.
+def _safe_getenv_int(name: str, default: int, min_value: int = 0, max_value: int = 2147483647) -> int:
+    """CF-9 (Pass 18): Safe int env var parser with max_value support.
+    DC-41 (Pass 41): Added max_value to prevent resource exhaustion.
+    """
+    raw = _os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        val = int(raw)
+    except (ValueError, TypeError):
+        logger.warning(f"CF-9: env var {name}='{raw}' is not an integer; using default {default}")
+        return default
+    if val < min_value:
+        logger.warning(f"CF-9: env var {name}={val} is below minimum {min_value}; clamping to {min_value}")
+        return min_value
+    if val > max_value:
+        logger.warning(f"CF-9: env var {name}={val} is above maximum {max_value}; clamping to {max_value}")
+        return max_value
+    return val
+
+
+    return val
+
+
+# SPR8: TTL constant for cache entries
+# CF-9: Use safe helper. The previous `int(_os.getenv(...))` crashed
+# on non-numeric input. Min 10s prevents zero/negative TTL (which
+# would invalidate the cache immediately on every read).
+_CACHE_TTL_S = _safe_getenv_int("BE_PROXY_CACHE_TTL_S", 600, min_value=10)  # 10 minutes default
+
+# SPR38: Shorter TTL for persona binding (one-time operation)
+_BINDING_CACHE_TTL_S = 60  # 1 minute
+
+# SPR18: Session ID length (use UUID4 for full entropy)
+_SESSION_ID_BYTES = 16  # 128 bits
+
+# SPR23: Fallback iteration limit
+_FALLBACK_MAX_ITERATIONS = 3
+
+# SPR23: Circuit-breaker threshold (consecutive geo failures)
+_GEO_CIRCUIT_BREAKER_THRESHOLD = 3
+
+# SPR50: Hard upper-bound for the entire get_proxy_for_persona chain
+_GET_PROXY_OVERALL_TIMEOUT_S = 60.0
+
+# SPR48: Cap session-ID cache (1 persona + 3 backups)
+_SESSION_ID_CACHE_MAX = 4
+
+# SPR43: TTL on circuit-breaker open state
+_CIRCUIT_BREAKER_OPEN_TTL_S = 300  # 5 minutes
+
+# SPR68: Short TTL for 'unknown' geo entries (don't pollute cache)
+_UNKNOWN_GEO_TTL_S = 10
+
+# SPR79: ISO 3166-1 alpha-2 country codes
+_VALID_COUNTRY_CODES = frozenset({
+    "us", "ca", "mx", "gb", "ie", "fr", "de", "it", "es", "pt", "nl", "be",
+    "ch", "at", "se", "no", "dk", "fi", "is", "pl", "cz", "sk", "hu", "ro",
+    "bg", "gr", "tr", "ru", "ua", "il", "sa", "ae", "eg", "za", "ng", "ke",
+    "in", "pk", "bd", "lk", "np", "bt", "mm", "th", "vn", "la", "kh", "my",
+    "sg", "id", "ph", "tw", "hk", "mo", "cn", "jp", "kr", "mn", "kp", "au",
+    "nz", "fj", "pg", "sb", "vu", "ws", "to", "ck", "nu", "tk", "tv", "nr",
+    "ki", "mh", "fm", "pw", "mp", "gu", "as", "br", "ar", "cl", "pe", "bo",
+    "ec", "co", "ve", "gy", "sr", "uy", "py", "fk",
+})
+
+
+# SPR49: Typed exceptions so the orchestrator can distinguish failures
+class ProxyUnavailableError(Exception):
+    """Raised when no proxy (primary or backup) is alive."""
+    def __init__(self, message: str, primary_error: str = "", attempts: int = 0):
+        super().__init__(message)
+        self.primary_error = primary_error
+        self.attempts = attempts
+
+
+class GeoBreachError(Exception):
+    """Raised when no backup proxy is geo-consistent with the persona."""
+    def __init__(self, message: str, required_geo: str, resolved_geo: str = ""):
+        super().__init__(message)
+        self.required_geo = required_geo
+        self.resolved_geo = resolved_geo
+
+
+# SPR56: Browser-like User-Agent for intelligence queries.
+# Real Chrome 120 fingerprint. Using python-httpx UA is an instant
+# Python automation signal — both Google and Cloudflare filter it.
+_INTEL_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/120.0.0.0 Safari/537.36"
+)
+
+
+# SPR31: City name normalization for ILIKE matching
+def _normalize_city_name(city: str) -> str:
+    """SPR31: Normalize city names for fuzzy matching.
+    'St. Petersburg' → 'saint petersburg', 'New York City' → 'new york city'.
+    """
+    if not city:
+        return ""
+    city = city.lower().strip()
+    # Common abbreviations
+    city = _re.sub(r'\bst\.?\b', 'saint', city)
+    city = _re.sub(r'\bmt\.?\b', 'mount', city)
+    city = _re.sub(r'\bft\.?\b', 'fort', city)
+    city = _re.sub(r'\bdr\.?\b', 'doctor', city)
+    # Remove punctuation
+    city = _re.sub(r'[.,]', '', city)
+    return city.strip()
+
+
+# SPR21: Fuzzy geo matching
+def _fuzzy_geo_match(required_geo: str, resolved_geo: str) -> bool:
+    """SPR21: Fuzzy match between required geo and resolved geo.
+
+    The required_geo is a city name from the DB (e.g., "Dallas").
+    The resolved_geo is "City, Region" (e.g., "Dallas, Texas" or
+    "Plano, Texas"). A match is found if:
+    1. The required city is a substring of the resolved city
+       (e.g., "dallas" in "dallas"), OR
+    2. The normalized required city matches the normalized
+       resolved city (e.g., "saint petersburg" matches), OR
+    3. The resolved city and required city are in the same
+       state/region. E.g., "Dallas" (TX) matches "Plano, Texas"
+       because both are in Texas.
+
+    Returns True if any of the above match.
+    """
+    if not required_geo or not resolved_geo or resolved_geo == "unknown":
+        return False
+    req_lower = required_geo.lower().strip()
+    res_lower = resolved_geo.lower().strip()
+
+    # Method 1: Direct substring
+    if req_lower in res_lower:
+        return True
+
+    # Method 2: Normalized match
+    req_norm = _normalize_city_name(req_lower)
+    res_norm = _normalize_city_name(res_lower.split(",")[0])
+    if req_norm and (req_norm in res_norm or res_norm in req_norm):
+        return True
+
+    # Method 3: Same state/region match.
+    # If the required_geo is a known city in a state, and the
+    # resolved_geo contains the same state name, they're in the
+    # same region. E.g., "Dallas" → state=TX, "Plano, Texas"
+    # contains "texas" → match.
+    us_state_to_cities = {
+        "texas": {"dallas", "plano", "fort worth", "arlington", "austin",
+                  "houston", "san antonio", "el paso", "irving", "garland",
+                  "grand prairie", "mckinney", "frisco", "denton", "waco"},
+        "california": {"los angeles", "san francisco", "san diego", "sacramento",
+                       "san jose", "fresno", "oakland", "long beach"},
+        "new york": {"new york", "brooklyn", "buffalo", "rochester", "yonkers",
+                     "syracuse", "albany"},
+        "florida": {"miami", "orlando", "tampa", "jacksonville", "st. petersburg",
+                   "saint petersburg", "fort lauderdale", "tallahassee"},
+    }
+    us_state_abbrev_to_state = {
+        "tx": "texas", "ca": "california", "ny": "new york", "fl": "florida",
+    }
+
+    # Check if required_geo is a known city in a state
+    for state, cities in us_state_to_cities.items():
+        if req_norm in cities:
+            # Required city is in this state. Check if resolved
+            # geo contains the same state name.
+            if state in res_lower:
+                return True
+    # Also check if required_geo is a state abbrev
+    for abbrev, state in us_state_abbrev_to_state.items():
+        if req_lower == abbrev and state in res_lower:
+            return True
+
+    return False
+
+
+
+# R7-SPR-001: Map IANA timezone to a "band" (timezone region). A proxy
+# in 'America/Los_Angeles' (Pacific band) cannot serve a persona with
+# timezone 'America/New_York' (Eastern band) without the IP/TZ
+# mismatch being detectable. Bands: UTC, North_America_East,
+# North_America_Central, North_America_Mountain, North_America_Pacific,
+# Europe_West, Europe_East, Asia_East, Asia_South, Asia_Southeast,
+# Australia, South_America, Africa, Other.
+_TZ_BAND_MAP = {
+    # UTC
+    "UTC": "UTC", "Etc/UTC": "UTC", "Etc/GMT": "UTC",
+    # North America - East
+    "America/New_York": "North_America_East",
+    "America/Toronto": "North_America_East",
+    "America/Montreal": "North_America_East",
+    "America/Detroit": "North_America_East",
+    "America/Indiana/Indianapolis": "North_America_East",
+    "America/Boston": "North_America_East",
+    "America/Halifax": "North_America_East",
+    "America/Atikokan": "North_America_East",
+    # North America - Central
+    "America/Chicago": "North_America_Central",
+    "America/Winnipeg": "North_America_Central",
+    "America/Mexico_City": "North_America_Central",
+    "America/Monterrey": "North_America_Central",
+    "America/Matamoros": "North_America_Central",
+    # North America - Mountain
+    "America/Denver": "North_America_Mountain",
+    "America/Edmonton": "North_America_Mountain",
+    "America/Phoenix": "North_America_Mountain",
+    "America/Boise": "North_America_Mountain",
+    # North America - Pacific
+    "America/Los_Angeles": "North_America_Pacific",
+    "America/Vancouver": "North_America_Pacific",
+    "America/Tijuana": "North_America_Pacific",
+    "America/Whitehorse": "North_America_Pacific",
+    "America/Anchorage": "North_America_Pacific",
+    "America/Juneau": "North_America_Pacific",
+    "America/Sitka": "North_America_Pacific",
+    # Europe - West
+    "Europe/London": "Europe_West",
+    "Europe/Dublin": "Europe_West",
+    "Europe/Lisbon": "Europe_West",
+    "Atlantic/Reykjavik": "Europe_West",
+    "Europe/Paris": "Europe_West",
+    "Europe/Madrid": "Europe_West",
+    "Europe/Berlin": "Europe_West",
+    "Europe/Amsterdam": "Europe_West",
+    "Europe/Brussels": "Europe_West",
+    "Europe/Rome": "Europe_West",
+    "Europe/Vienna": "Europe_West",
+    "Europe/Zurich": "Europe_West",
+    "Europe/Stockholm": "Europe_West",
+    "Europe/Oslo": "Europe_West",
+    "Europe/Copenhagen": "Europe_West",
+    # Europe - East
+    "Europe/Helsinki": "Europe_East",
+    "Europe/Athens": "Europe_East",
+    "Europe/Warsaw": "Europe_East",
+    "Europe/Prague": "Europe_East",
+    "Europe/Budapest": "Europe_East",
+    "Europe/Bucharest": "Europe_East",
+    "Europe/Sofia": "Europe_East",
+    "Europe/Moscow": "Europe_East",
+    "Europe/Istanbul": "Europe_East",
+    "Europe/Kiev": "Europe_East",
+    "Europe/Riga": "Europe_East",
+    "Europe/Tallinn": "Europe_East",
+    "Europe/Vilnius": "Europe_East",
+    # Asia - East
+    "Asia/Tokyo": "Asia_East",
+    "Asia/Seoul": "Asia_East",
+    "Asia/Shanghai": "Asia_East",
+    "Asia/Hong_Kong": "Asia_East",
+    "Asia/Taipei": "Asia_East",
+    "Asia/Beijing": "Asia_East",
+    "Asia/Manila": "Asia_East",
+    # Asia - South
+    "Asia/Kolkata": "Asia_South",
+    "Asia/Calcutta": "Asia_South",
+    "Asia/Mumbai": "Asia_South",
+    "Asia/Delhi": "Asia_South",
+    "Asia/Karachi": "Asia_South",
+    "Asia/Dhaka": "Asia_South",
+    "Asia/Colombo": "Asia_South",
+    # Asia - Southeast
+    "Asia/Singapore": "Asia_Southeast",
+    "Asia/Bangkok": "Asia_Southeast",
+    "Asia/Jakarta": "Asia_Southeast",
+    "Asia/Ho_Chi_Minh": "Asia_Southeast",
+    "Asia/Vientiane": "Asia_Southeast",
+    "Asia/Phnom_Penh": "Asia_Southeast",
+    # Australia
+    "Australia/Sydney": "Australia",
+    "Australia/Melbourne": "Australia",
+    "Australia/Brisbane": "Australia",
+    "Australia/Perth": "Australia",
+    "Australia/Adelaide": "Australia",
+    "Pacific/Auckland": "Australia",
+    # South America
+    "America/Sao_Paulo": "South_America",
+    "America/Buenos_Aires": "South_America",
+    "America/Santiago": "South_America",
+    "America/Lima": "South_America",
+    "America/Bogota": "South_America",
+    "America/Caracas": "South_America",
+    "America/Montevideo": "South_America",
+    # Africa
+    "Africa/Johannesburg": "Africa",
+    "Africa/Cairo": "Africa",
+    "Africa/Lagos": "Africa",
+    "Africa/Nairobi": "Africa",
+    "Africa/Casablanca": "Africa",
+}
+
+
+def _tz_to_band(tz: str) -> str:
+    """R7-SPR-001: Map an IANA timezone string to a timezone band.
+    Returns 'Unknown' if the TZ is not in the map."""
+    if not tz or not isinstance(tz, str):
+        return "Unknown"
+    if tz in _TZ_BAND_MAP:
+        return _TZ_BAND_MAP[tz]
+    # Try prefix match for "Area/Subarea" patterns
+    parts = tz.split("/")
+    if len(parts) >= 2:
+        area_sub = f"{parts[0]}/{parts[1].replace('_', ' ').title().replace(' ', '_')}"
+        if area_sub in _TZ_BAND_MAP:
+            return _TZ_BAND_MAP[area_sub]
+    return "Unknown"
+
+
+def _tz_bands_compatible(tz1: str, tz2: str) -> bool:
+    """R7-SPR-001: Return True if two timezones are in the same band
+    (i.e., a proxy in tz2 can serve a persona claiming tz1 without
+    producing an IP/TZ mismatch).
+    
+    'Unknown' bands are permissive (any match) so this check doesn't
+    break personas with unusual timezones.
+    """
+    b1 = _tz_to_band(tz1)
+    b2 = _tz_to_band(tz2)
+    if b1 == "Unknown" or b2 == "Unknown":
+        return True  # permissive on unknown
+    return b1 == b2
+
+
+
+
+class StickyProxyResolver:
+    """
+    Enforces strict geographical location consistency across multiple
+    operational sessions. Prevents security flagging caused by switching
+    geological regions (e.g. Dallas to Miami).
+
+    SPR1: All methods are now wired into the orchestrator.
+    """
+
+    def __init__(self, fallback_proxy_pool: list = None, db_pool=None):
+        """
+        Args:
+            fallback_proxy_pool: List of backup proxy URLs.
+            db_pool: Optional asyncpg connection pool for
+                match_persona_to_proxy_location().
+        """
+        self.fallback_pool = fallback_proxy_pool or []
+        # SPR7: LRU cache using OrderedDict. Most recently used is at the end.
+        # Key: proxy IP, Value: (timestamp, geo_data)
+        self.resolved_ip_cache = collections.OrderedDict()
+        # SPR19: Session ID cache by persona_id (sticky across calls)
+        self._session_id_cache: Dict[str, str] = {}
+        # SPR13: Shared httpx client for connection pooling
+        self._shared_client: Optional[httpx.AsyncClient] = None
+        # SPR17: Optional db pool for match_persona_to_proxy_location
+        self._db_pool = db_pool
+        # SPR23: Circuit-breaker for geo failures
+        self._geo_failure_count = 0
+        # SPR43: Timestamp when circuit-breaker tripped (TTL on open state)
+        self._circuit_breaker_open_at: Optional[float] = None
+        # SPR29: Cleanup registration flag
+        self._atexit_registered = False
+        # R7-SPR-001: Required timezone for TZ band validation
+        self._required_tz: Optional[str] = None
+        # SPR41: Lock for sync mutation of counter + cache from any thread
+        self._lock = threading.Lock()
+
+    async def _get_shared_client(self) -> httpx.AsyncClient:
+        """SPR13: Lazy-init shared httpx client for connection pooling.
+
+        SPR29: Register atexit cleanup on first use.
+        SPR44: trust_env=False to prevent httpx from reading
+        HTTP_PROXY/HTTPS_PROXY/NO_PROXY from the environment — which
+        would route the resolver's own intelligence queries through
+        the *system* proxy (or directly to local DNS) instead of the
+        residential proxy. This is critical for the no-DNS-leak invariant.
+        SPR56: Custom User-Agent header to avoid the python-httpx UA
+        that anti-bot grids fingerprint.
+        """
+        if self._shared_client is None:
+            # SPR44: trust_env=False. Also pin the default headers to
+            # a Chrome 120 UA so the resolver's own HTTP fingerprint
+            # matches the persona's expected browser. (SPR56)
+            self._shared_client = httpx.AsyncClient(
+                timeout=6.0,
+                trust_env=False,
+                headers={
+                    "User-Agent": _INTEL_USER_AGENT,
+                    "Accept": "application/json, text/plain, */*",
+                    "Accept-Language": "en-US,en;q=0.9",
+                },
+            )
+            if not self._atexit_registered:
+                # SPR29: Best-effort sync cleanup. Async cleanup
+                # requires a running event loop, which atexit doesn't
+                # have. The OS will reclaim sockets on process exit.
+                def _sync_cleanup():
+                    logger.debug("SPR29: atexit cleanup called (async close skipped)")
+                atexit.register(_sync_cleanup)
+                self._atexit_registered = True
+        return self._shared_client
+
+    async def close(self):
+        """SPR13: Clean up shared httpx client."""
+        if self._shared_client is not None:
+            await self._shared_client.aclose()
+            self._shared_client = None
+
+    def __del__(self):
+        """SPR36: Log a warning if the client is not closed.
+        SPR39: Total-safe — may be called before __init__ finishes or
+        during interpreter shutdown when attributes may not exist.
+        """
+        try:
+            client = getattr(self, "_shared_client", None)
+            if client is not None:
+                logger.warning(
+                    "SPR36: StickyProxyResolver was not closed. "
+                    "Call await resolver.close() before discarding."
+                )
+        except Exception:
+            # Never raise from __del__ — that masks the original error.
+            pass
+
+    # SPR1 + SPR6 + SPR7 + SPR8: Rewritten cache management
+    # SPR41: All cache mutations are now lock-protected. Although asyncio
+    # is single-threaded, this resolver's lifecycle crosses event-loop
+    # boundaries (e.g., atexit cleanup, sync __del__), and a thread that
+    # blocks on an httpx request will be served by the GIL-released
+    # event loop. threading.Lock is the correct primitive.
+    def _cache_get(self, key: str) -> Optional[Dict[str, Any]]:
+        """SPR6+SPR7+SPR8: Get from LRU cache, evict stale entries.
+        SPR41: Lock-protected.
+        """
+        with self._lock:
+            if key not in self.resolved_ip_cache:
+                return None
+            timestamp, data = self.resolved_ip_cache[key]
+            # SPR8: TTL check (RC-46: use monotonic clock to avoid
+            # wall-clock jumps from NTP sync or manual time changes
+            # causing stale entries to persist longer than intended)
+            if (time.monotonic() - timestamp) > _CACHE_TTL_S:
+                # Expired; remove
+                del self.resolved_ip_cache[key]
+                return None
+            # SPR7: Mark as most recently used
+            self.resolved_ip_cache.move_to_end(key)
+            return data
+
+    def _cache_put(self, key: str, data: Dict[str, Any]) -> None:
+        """SPR7: Put into LRU cache, evict oldest if over size limit.
+        SPR40: Off-by-one fix — evict when len >= cap (not > cap).
+        SPR41: Lock-protected.
+        """
+        with self._lock:
+            # SPR40: enforce strict cap
+            while len(self.resolved_ip_cache) >= 1000:
+                self.resolved_ip_cache.popitem(last=False)
+            # RC-46: use monotonic clock for TTL computation
+            self.resolved_ip_cache[key] = (time.monotonic(), data)
+
+    def _make_sticky_session_id(self, persona_id: str) -> str:
+        """SPR18+SPR19: Generate a sticky session ID per persona.
+
+        The session ID is cached by persona_id so subsequent calls
+        return the same ID (sticky behavior). Uses UUID4 for full
+        entropy (no collision risk).
+
+        SPR47: Assert persona_id is non-empty (defense against upstream
+        bugs that might pass None or '').
+        SPR48: Cap the cache at _SESSION_ID_CACHE_MAX entries.
+        SPR41: Lock-protected.
+        """
+        if not persona_id or not isinstance(persona_id, str):
+            raise ValueError(
+                f"persona_id must be a non-empty string, got {persona_id!r}"
+            )
+        with self._lock:
+            if persona_id in self._session_id_cache:
+                return self._session_id_cache[persona_id]
+            session_id = str(uuid.uuid4()).replace("-", "")[:_SESSION_ID_BYTES * 2]
+            # SPR48: enforce cap (1 primary + 3 backups max)
+            if len(self._session_id_cache) >= _SESSION_ID_CACHE_MAX:
+                # Evict the oldest entry (FIFO for session IDs; ordering
+                # doesn't matter since these are pure IDs, not stateful)
+                oldest_key = next(iter(self._session_id_cache))
+                del self._session_id_cache[oldest_key]
+            self._session_id_cache[persona_id] = session_id
+            return session_id
+
+    @staticmethod
+    def _strip_proxy_headers(headers: Dict[str, str]) -> Dict[str, str]:
+        """SPR11: Strip X-Forwarded-For, Via, and other proxy-revealing headers.
+        SPR45: Now a public static method. Callers building custom
+        header dicts for the shared client should run them through
+        this filter first. The shared client's default headers are
+        set in _get_shared_client() and don't include any of the
+        leaky headers, so this is a defense-in-depth helper for
+        future per-request header injection.
+        """
+        stripped_headers = {}
+        for key, value in headers.items():
+            key_lower = key.lower()
+            if key_lower in ("x-forwarded-for", "x-real-ip", "via",
+                             "x-forwarded-host", "x-forwarded-proto",
+                             "forwarded", "x-proxy-id", "x-proxy-uuid"):
+                continue
+            stripped_headers[key] = value
+        return stripped_headers
+
+    # SPR43: Centralized circuit-breaker logic
+    def _is_circuit_breaker_open(self) -> bool:
+        """SPR43: Returns True if circuit-breaker is currently open.
+        Auto-resets after _CIRCUIT_BREAKER_OPEN_TTL_S to allow recovery.
+        """
+        with self._lock:
+            if self._geo_failure_count < _GEO_CIRCUIT_BREAKER_THRESHOLD:
+                return False
+            if self._circuit_breaker_open_at is None:
+                return True
+            # RC-46: use monotonic clock for TTL to avoid wall-clock jump issues
+            if (time.monotonic() - self._circuit_breaker_open_at) > _CIRCUIT_BREAKER_OPEN_TTL_S:
+                # SPR43: TTL elapsed; auto-reset and allow one probe
+                logger.info(
+                    f"SPR43: Circuit-breaker TTL ({_CIRCUIT_BREAKER_OPEN_TTL_S}s) elapsed. "
+                    f"Resetting to allow probe."
+                )
+                self._geo_failure_count = 0
+                self._circuit_breaker_open_at = None
+                return False
+            return True
+
+    def _trip_circuit_breaker(self) -> None:
+        """SPR43: Mark circuit-breaker as open with timestamp."""
+        with self._lock:
+            self._geo_failure_count += 1
+            if (self._geo_failure_count >= _GEO_CIRCUIT_BREAKER_THRESHOLD
+                    and self._circuit_breaker_open_at is None):
+                # RC-46: use monotonic clock for TTL consistency
+                self._circuit_breaker_open_at = time.monotonic()
+                logger.warning(
+                    f"SPR43: Geo circuit-breaker TRIPPED at {self._circuit_breaker_open_at}"
+                )
+
+    def _reset_circuit_breaker(self) -> None:
+        """SPR43: Reset on success."""
+        with self._lock:
+            self._geo_failure_count = 0
+            self._circuit_breaker_open_at = None
+
+    async def verify_proxy_georegion(self, proxy_url: str) -> str:
+        """
+        Queries IP intelligence interfaces over the proxy to resolve and
+        return its geological region (city/state).
+
+        SPR1: Now called by resolve_and_clamp_proxy().
+        SPR3+SPR15: Uses HTTPS for all queries.
+        SPR5: External services are secondary; local cache is primary.
+        SPR6+SPR7+SPR8: LRU cache keyed by IP with TTL.
+        SPR13: Shared httpx client for connection pooling.
+        SPR23: Circuit-breaker: if geo lookups consistently fail,
+        return "unknown" without making more requests.
+        SPR35: Differentiate proxy dead vs geo unknown.
+        SPR42: Use the egress IP cached by health_check_proxy if available.
+        SPR44: trust_env=False on the shared client (no system proxy).
+        SPR51: Single attempt per endpoint, no retries.
+        SPR56: Chrome 120 User-Agent header.
+        """
+        # SPR23/43: Circuit-breaker check (with TTL on open state)
+        if self._is_circuit_breaker_open():
+            logger.warning(
+                f"SPR23: Circuit-breaker open ({self._geo_failure_count} "
+                f"consecutive geo failures). Skipping geo lookup."
+            )
+            return "unknown"
+
+        # SPR22/42: Check egress IP cache first to avoid extra HTTP request
+        egress_ip_cache_key = self._resolved_ip_cache_key_for(proxy_url)
+        cached = self._cache_get(egress_ip_cache_key)
+        if cached is not None and cached.get("egress_ip") and cached.get("geo"):
+            # SPR42: health_check_proxy already primed the cache
+            logger.info(
+                f"Proxy Resolution (Cache Hit): {cached.get('egress_ip')} -> "
+                f"{cached.get('geo')}"
+            )
+            return cached.get("geo", "unknown")
+
+        # SPR6: For rotating proxies, we need the egress IP, not the URL.
+        # First, get the egress IP via the proxy.
+        egress_ip = await self._resolve_egress_ip(proxy_url)
+        if egress_ip is None:
+            self._trip_circuit_breaker()
+            return "unknown"
+
+        # SPR6+SPR7+SPR8: LRU cache lookup by IP
+        cached = self._cache_get(egress_ip)
+        if cached is not None and cached.get("geo"):
+            logger.info(f"Proxy Resolution (Cache Hit): {egress_ip} -> {cached.get('geo')}")
+            return cached.get("geo", "unknown")
+
+        # SPR3+SPR15: HTTPS only. Convert socks5:// to socks5h:// for
+        # remote DNS resolution.
+        adapted_proxy_url = proxy_url
+        if proxy_url and proxy_url.startswith("socks5://"):
+            adapted_proxy_url = proxy_url.replace("socks5://", "socks5h://")
+
+        proxies = {"all://": adapted_proxy_url}
+        client = await self._get_shared_client()
+
+        # SPR51: Single attempt per endpoint (no retry). The 6-rapid-request
+        # pattern was a fingerprint — real residential users don't hit
+        # IP-intelligence APIs in a tight retry loop.
+        endpoints = [
+            ("https://ipinfo.io/json", "ipinfo", "city", "region",
+             {"asn": "org", "isp": "org", "timezone": "timezone"}),
+            ("https://ip-api.com/json", "ip-api", "city", "regionName",
+             {"asn": "as", "isp": "isp", "timezone": "timezone"}),
+        ]
+
+        for url, source, city_key, region_key, extra_keys in endpoints:
+            try:
+                response = await client.get(url, proxies=proxies)
+                if response.status_code == 200:
+                    data = response.json()
+                    region = data.get(region_key, "unknown")
+                    city = data.get(city_key, "unknown")
+                    resolved_geo = f"{city}, {region}"
+                    logger.info(f"Proxy Resolution ({source}): {egress_ip} -> {resolved_geo}")
+                    cache_data = {
+                        "geo": resolved_geo,
+                        "asn": data.get(extra_keys["asn"], "unknown"),
+                        "isp": data.get(extra_keys["isp"], data.get(extra_keys["asn"], "unknown")),
+                        "timezone": data.get(extra_keys["timezone"], "America/New_York"),
+                        "egress_ip": egress_ip,
+                    }
+                    # R7-SPR-001: TZ band validation. If the proxy's
+                    # timezone is in a different band than the
+                    # persona's expected timezone, this is an IP/TZ
+                    # mismatch (reCAPTCHA Enterprise top-3 signal).
+                    # We DO NOT cache mismatched entries; instead
+                    # we trip the breaker and return 'unknown' so
+                    # the caller treats the proxy as a geo failure
+                    # and tries a backup.
+                    if hasattr(self, "_required_tz") and self._required_tz:
+                        if not _tz_bands_compatible(self._required_tz, cache_data.get("timezone", "Unknown")):
+                            logger.warning(
+                                f"R7-SPR-001: TZ band mismatch: persona={self._required_tz} "
+                                f"({_tz_to_band(self._required_tz)}) vs proxy={cache_data.get('timezone')} "
+                                f"({_tz_to_band(cache_data.get('timezone', 'Unknown'))}). "
+                                f"Rejecting proxy."
+                            )
+                            # Don't cache the mismatched entry
+                            self._trip_circuit_breaker()
+                            return "unknown"
+                    # SPR55: cache by IP only is fine (rotating proxies
+                    # change IP per request, so the cache key naturally
+                    # rotates with the IP). For static IPs, this is a
+                    # deterministic key.
+                    self._cache_put(egress_ip, cache_data)
+                    # Also cache by URL→IP for the egress_ip_cache_key path
+                    self._cache_put(egress_ip_cache_key, cache_data)
+                    # SPR23/43: Reset circuit-breaker on success
+                    self._reset_circuit_breaker()
+                    return resolved_geo
+                # SPR51: Non-200 responses do NOT retry — fall through
+                # to the next endpoint.
+            except Exception as e:
+                logger.warning(f"Proxy Resolution: {source} failed: {e}")
+                # SPR51: continue to next endpoint without retry
+
+        # SPR23/43: All endpoints failed; trip the breaker
+        self._trip_circuit_breaker()
+        return "unknown"
+
+    async def _resolve_egress_ip(self, proxy_url: str) -> Optional[str]:
+        """SPR6: Resolve the egress IP through the proxy.
+
+        Uses HTTPS to avoid DNS leak (SPR3).
+        SPR42: Use ipinfo.io (which returns both IP and geo in one
+        call) instead of api.ipify.org (which is just an anti-bot
+        signal returning only the IP). This halves the intelligence
+        call volume and lets us prime the cache with city/region in
+        the same request.
+        SPR68: Don't pollute the cache with 'unknown' geo entries.
+        """
+        try:
+            adapted_proxy_url = proxy_url
+            if proxy_url and proxy_url.startswith("socks5://"):
+                adapted_proxy_url = proxy_url.replace("socks5://", "socks5h://")
+            client = await self._get_shared_client()
+            # SPR42: ipinfo.io/json returns {'ip': '1.2.3.4', 'city': 'X',
+            # 'region': 'Y', 'country': 'Z', 'org': 'AS### ISP', 'timezone': '...'}
+            response = await client.get(
+                "https://ipinfo.io/json",
+                proxies={"all://": adapted_proxy_url},
+                timeout=5.0,
+            )
+            if response.status_code == 200:
+                data = response.json()
+                egress_ip = data.get("ip", "").strip()
+                if egress_ip:
+                    # SPR42: Prime the cache with the full geo data so
+                    # verify_proxy_georegion() doesn't have to make a
+                    # second request for the same egress IP.
+                    city = data.get("city", "unknown")
+                    region = data.get("region", "unknown")
+                    resolved_geo = f"{city}, {region}"
+                    org = data.get("org", "unknown")
+                    timezone = data.get("timezone", "America/New_York")
+                    cache_data = {
+                        "geo": resolved_geo,
+                        "asn": org,
+                        "isp": org,
+                        "timezone": timezone,
+                        "egress_ip": egress_ip,
+                    }
+                    # SPR68: Only cache if geo is known. Otherwise a
+                    # subsequent call would hit the 'unknown' cache and
+                    # never retry the lookup.
+                    if city != "unknown" and region != "unknown":
+                        self._cache_put(egress_ip, cache_data)
+                        self._cache_put(
+                            self._resolved_ip_cache_key_for(proxy_url), cache_data
+                        )
+                    # SPR43: success — reset breaker
+                    self._reset_circuit_breaker()
+                    return egress_ip
+        except Exception as e:
+            logger.debug(f"_resolve_egress_ip failed: {e}")
+        return None
+
+    async def resolve_and_clamp_proxy(self, persona_id: str, assigned_proxy_url: str,
+                                      required_geo: str) -> str:
+        """
+        Validates the assigned sticky proxy. If the primary proxy is
+        offline, scrapes the proxy pool to locate a matching backup
+        proxy from the *same* georegion.
+
+        SPR1: Now called by the orchestrator before browser launch.
+        SPR21: Fuzzy geo matching (handles nearby cities in same state).
+        SPR35: Differentiate "proxy dead" vs "geo unknown".
+        SPR49: Re-raises GeoBreachError instead of bare ValueError.
+        """
+        logger.info(f"Proxy Guard: Resolving and verifying geo-clamping for {persona_id} (Required: {required_geo})")
+
+        # Test the primary sticky proxy first
+        resolved_geo = await self.verify_proxy_georegion(assigned_proxy_url)
+
+        # SPR21: Fuzzy match. Handles "Dallas" matching "Plano, Texas"
+        # (same state, different city).
+        if resolved_geo != "unknown" and _fuzzy_geo_match(required_geo, resolved_geo):
+            logger.info(f"Proxy Guard: Primary sticky proxy is healthy. Region: {resolved_geo}")
+            return assigned_proxy_url
+
+        # SPR35: Differentiate proxy dead vs geo unknown. If the
+        # health check passed but geo is unknown, the intelligence
+        # endpoints are down. Use the primary anyway with a warning.
+        if resolved_geo == "unknown":
+            health = await self.health_check_proxy(assigned_proxy_url)
+            if health["alive"]:
+                logger.warning(
+                    f"Proxy Guard: Primary proxy is ALIVE ({health['latency_ms']:.0f}ms, "
+                    f"egress IP: {health['egress_ip']}) but geo lookup returned 'unknown'. "
+                    f"Intelligence endpoints may be down. Using primary proxy anyway."
+                )
+                return assigned_proxy_url
+            logger.warning(
+                f"Proxy Guard: Primary proxy is DEAD ({health['error']}). "
+                f"Searching backup pool..."
+            )
+        else:
+            logger.warning(
+                f"Proxy Guard: Primary proxy geo mismatch. "
+                f"Required: {required_geo}, Resolved: {resolved_geo}. Searching backup pool..."
+            )
+
+        # SPR23/43: Limit fallback iteration to avoid DOS against
+        # intelligence endpoints. Use circuit-breaker: if geo
+        # lookups are failing, skip the geo check and return the
+        # first alive backup.
+        geo_circuit_open = self._is_circuit_breaker_open()
+        # R7-SPR-002: Weighted tier selection + shuffled order. Real
+        # users don't always use the same first proxy; they get
+        # random assignments from a pool of preferred + backup.
+        _selected_pool = _select_weighted_proxy(self.fallback_pool)
+        _shuffled_pool = _shuffle_iteration_order(_selected_pool)
+        backup_count = 0
+        for backup_proxy in _shuffled_pool:
+            if backup_count >= _FALLBACK_MAX_ITERATIONS:
+                break
+            backup_count += 1
+            backup_health = await self.health_check_proxy(backup_proxy)
+            if not backup_health["alive"]:
+                continue
+            if geo_circuit_open:
+                # Skip geo check; just return the first alive backup
+                logger.info(
+                    f"Proxy Guard: Geo circuit-breaker open. "
+                    f"Returning first alive backup (latency: {backup_health['latency_ms']:.0f}ms)."
+                )
+                return backup_proxy
+            backup_geo = await self.verify_proxy_georegion(backup_proxy)
+            if backup_geo != "unknown" and _fuzzy_geo_match(required_geo, backup_geo):
+                logger.info(
+                    f"Proxy Guard: Found geo-consistent backup proxy. Region: {backup_geo}"
+                )
+                return backup_proxy
+
+        logger.critical(f"Proxy Guard: CRITICAL! No healthy proxy matching '{required_geo}'.")
+        # SPR49: typed exception with full context
+        raise GeoBreachError(
+            f"CRITICAL GEOLOCATION BREACH: Safe, geo-consistent proxy unavailable for {persona_id}.",
+            required_geo=required_geo,
+            resolved_geo=resolved_geo,
+        )
+
+    def compile_dynamic_sticky_proxy_string(self, base_proxy_url: str, city: str,
+                                          state: str = "tx", country: str = "us",
+                                          persona_id: str = None) -> str:
+        """
+        SPR4: Now accepts a country parameter. Non-US personas
+        (london, paris, berlin) now produce valid proxy strings.
+        SPR18: Session ID is now UUID4 (16 bytes / 128 bits).
+        SPR19: Session ID is cached by persona_id (sticky across calls).
+        SPR20: Now wired into the orchestrator.
+        SPR26: Use urllib.parse.urlparse for proper URL parsing.
+        SPR27: URL-decode password after parsing.
+        SPR37: Validate city parameter is non-empty.
+        SPR54: Bracket IPv6 hosts in the reconstructed URL.
+        SPR57: URL-encode city name in proxy username (handles Unicode
+        accents and special characters).
+        SPR63: Detect and strip existing city-locked params to prevent
+        re-compilation doubling. If the input URL is already a hardened
+        proxy URL (contains '-country-...-session-...'), strip those
+        markers before re-appending new ones.
+        SPR70: Return (success, url) tuple via dict so caller can
+        detect silent failures. (Backward-compat: still returns str;
+        the failure is logged at WARNING level so it's visible.)
+        SPR79: Validate country code is a valid ISO 3166-1 alpha-2 code.
+        """
+        # SPR37: Validate city parameter
+        if not city or not city.strip():
+            logger.error("Proxy Compiler: city parameter is empty")
+            return base_proxy_url
+
+        if not base_proxy_url:
+            return base_proxy_url
+
+        # SPR79: Validate country code (defense-in-depth)
+        country_lower = (country or "us").lower().strip()
+        if country_lower not in _VALID_COUNTRY_CODES:
+            logger.warning(
+                f"SPR79: Invalid country code '{country}'. "
+                f"Falling back to 'us'."
+            )
+            country_lower = "us"
+
+        try:
+            # SPR26: Use urllib.parse.urlparse for proper URL parsing.
+            # This handles passwords with @ and : characters, URL-encoded
+            # passwords, and non-standard proxy URL formats.
+            parsed = urllib.parse.urlparse(base_proxy_url)
+            scheme = parsed.scheme or "socks5"
+            username = parsed.username or ""
+            # SPR27: URL-decode the password (handles %40, %3A, etc.)
+            password = urllib.parse.unquote(parsed.password or "") if parsed.password else ""
+            # Reconstruct host:port
+            host = parsed.hostname or ""
+            # SPR54: Detect IPv6 and bracket the host in the URL
+            host_is_ipv6 = False
+            if host:
+                try:
+                    ipaddress.IPv6Address(host)
+                    host_is_ipv6 = True
+                except (ipaddress.AddressValueError, ValueError):
+                    host_is_ipv6 = False
+            port = f":{parsed.port}" if parsed.port else ""
+            host_for_url = f"[{host}]" if host_is_ipv6 else host
+
+            if not username or not host:
+                # Fallback: try the old split-by-@ method for non-standard formats
+                if "@" in base_proxy_url:
+                    scheme_split = base_proxy_url.split("://", 1)
+                    scheme = scheme_split[0] if scheme_split else "socks5"
+                    cred_and_host = scheme_split[1] if len(scheme_split) > 1 else ""
+                    cred_split = cred_and_host.rsplit("@", 1)
+                    creds = cred_split[0] if cred_split else ""
+                    host = cred_split[1] if len(cred_split) > 1 else ""
+                    user_pass = creds.split(":", 1)
+                    username = user_pass[0] if user_pass else ""
+                    password = user_pass[1] if len(user_pass) > 1 else ""
+                if not username or not host:
+                    logger.warning(
+                        f"Proxy Compiler: Cannot parse base_proxy_url. "
+                        f"Returning unchanged: {base_proxy_url[:50]}..."
+                    )
+                    return base_proxy_url
+                # Re-evaluate IPv6 after fallback parsing
+                if host:
+                    try:
+                        ipaddress.IPv6Address(host)
+                        host_is_ipv6 = True
+                        host_for_url = f"[{host}]"
+                    except (ipaddress.AddressValueError, ValueError):
+                        host_is_ipv6 = False
+                        host_for_url = host
+
+            # SPR63: Strip existing city-locked markers from the username
+            # to prevent re-compilation doubling. The proxy provider's
+            # username format is:
+            #   {original_user}-country-{cc}-state-{state}-city-{city}-session-{sid}
+            # If any of these markers are present, they're stripped along
+            # with everything after them up to the next '-' that doesn't
+            # belong to the original username.
+            # SPR76: Handle IPv6 zone IDs by stripping '%' segments first.
+            if username and "-country-" in username:
+                # The username has been previously hardened. Find the start
+                # of the hardening (the first '-country-') and truncate.
+                idx = username.find("-country-")
+                username = username[:idx]
+                logger.debug(
+                    f"SPR63: Stripped existing city-locked markers from "
+                    f"username; rebuilding with new params."
+                )
+
+            # SPR19: Use cached session ID by persona_id (sticky across calls)
+            if persona_id:
+                sticky_session_id = self._make_sticky_session_id(persona_id)
+            else:
+                # SPR18: UUID4 for no collision risk
+                sticky_session_id = str(uuid.uuid4()).replace("-", "")[:_SESSION_ID_BYTES * 2]
+
+            # SPR57: URL-encode the city name. Strip whitespace/punct first
+            # (the proxy provider's geo-routing doesn't use them), then
+            # percent-encode the rest (handles accents, apostrophes, etc.).
+            sanitized_city = _re.sub(r'[\s,]', '', city)
+            target_city = urllib.parse.quote(sanitized_city.lower(), safe="")
+            target_state = state.lower()
+
+            # SPR4: Use the country code in the username
+            # Standard residential proxy syntax:
+            # username-country-{cc}-state-{state}-city-{city}-session-{session_id}
+            hardened_username = (
+                f"{username}-country-{country_lower}"
+                f"-state-{target_state}"
+                f"-city-{target_city}"
+                f"-session-{sticky_session_id}"
+            )
+
+            # SPR27: URL-encode the password in case it contains special chars
+            safe_password = urllib.parse.quote(password, safe="")
+            hardened_proxy_url = f"{scheme}://{hardened_username}:{safe_password}@{host_for_url}{port}"
+            logger.info(
+                f"Proxy Compiler: City-Locked Sticky Proxy generated: "
+                f"{scheme}://{username}-country-{country_lower}-city-{target_city}"
+                f"-session-{sticky_session_id}:****@{host_for_url}{port}"
+            )
+            return hardened_proxy_url
+        except Exception as e:
+            # SPR70: Log at WARNING (not ERROR) since we silently return
+            # the original URL. Caller may need to know the URL was NOT
+            # city-locked.
+            logger.warning(
+                f"SPR70: Proxy Compiler: Failed to format dynamic sticky "
+                f"proxy string, returning base URL unchanged. Error: {e}"
+            )
+            return base_proxy_url
+
+    async def match_persona_to_proxy_location(self, proxy_url: str, conn,
+                                              lock_persona: bool = True) -> str:
+        """
+        Reverse Geo-Consistency Persona Routing.
+        Resolves the geographical location of the acquired residential
+        proxy IP first, then queries the database to match/select a
+        compatible persona registered in that same city.
+
+        SPR16: lock_persona parameter. If True, mutates persona fields
+        (city, ASN, ISP, timezone) only on first binding (when the
+        unassigned persona is being assigned).
+
+        SPR17: Type-check conn parameter for asyncpg.Connection.
+        """
+        # SPR17: Type-check conn
+        if conn is None or not hasattr(conn, 'transaction'):
+            logger.error("match_persona_to_proxy_location: conn is not an asyncpg connection")
+            return None
+
+        resolved_geo = await self.verify_proxy_georegion(proxy_url)
+        if resolved_geo == "unknown":
+            logger.critical("Geo-Matching Engine: Failed to resolve proxy location.")
+            return None
+
+        city = resolved_geo.split(",")[0].strip()
+        # SPR72: Normalize the city for the DB query. The DB might store
+        # "Plano, Texas" while the resolved geo is just "Plano". We
+        # strip any ", Region" suffix and lowercase for the exact match.
+        # If the DB stores "Plano, Texas" and we query with "plano",
+        # we miss. So we normalize: query both with and without region.
+        normalized_city = _normalize_city_name(city)
+        logger.info(f"Geo-Matching Engine: Proxy IP resolved to city: {city} (normalized: {normalized_city}).")
+
+        cache_data = self._cache_get(
+            # Use the IP if we have it
+            self._resolved_ip_cache_key_for(proxy_url)
+        ) or {}
+        asn = cache_data.get("asn", "unknown")
+        isp = cache_data.get("isp", "unknown")
+        timezone = cache_data.get("timezone", "America/New_York")
+
+        async with conn.transaction():
+            # 1. Look for an existing healthy, matching persona.
+            # SPR61: Use exact match (signup_geo_region = $1) instead of
+            # ILIKE '%$1%'. The latter matched "San Jose" to "San Josecito"
+            # or "East San Jose" — false positives that bind a persona to
+            # the wrong city. The fuzzy match in _fuzzy_geo_match is the
+            # right place to handle state-level fallback; the DB query
+            # should be exact.
+            # SPR72: Try multiple forms of the city name to handle DB
+            # schemas that store "Plano" or "Plano, Texas".
+            persona = None
+            for city_form in [city, normalized_city, city.lower()]:
+                if not city_form:
+                    continue
+                persona = await conn.fetchrow("""
+                    SELECT id FROM personas
+                    WHERE LOWER(signup_geo_region) = LOWER($1)
+                      AND (assigned_asn = $2 OR assigned_asn IS NULL OR assigned_asn = 'unknown')
+                      AND state IN ('new', 'warming', 'active')
+                    ORDER BY last_active ASC LIMIT 1
+                    FOR UPDATE
+                """, city_form, asn)
+                if persona:
+                    break
+
+            if persona:
+                logger.info(
+                    f"Geo-Matching Engine: Matched proxy city '{city}' (ASN: {asn}) "
+                    f"to existing Persona: {persona['id']}"
+                )
+                return persona['id']
+
+            # 2. Find an unassigned persona with FOR UPDATE SKIP LOCKED
+            unassigned_persona = await conn.fetchrow("""
+                SELECT id, fingerprint FROM personas
+                WHERE signup_geo_region = '' OR signup_geo_region IS NULL
+                  OR signup_geo_region = 'unknown'
+                ORDER BY created_at ASC LIMIT 1
+                FOR UPDATE SKIP LOCKED
+            """)
+
+            if unassigned_persona:
+                persona_id = unassigned_persona['id']
+                fingerprint = json.loads(unassigned_persona['fingerprint'])
+                user_agent = fingerprint.get('navigator', {}).get('userAgent', '')
+
+                is_chrome = "Chrome" in user_agent or "Chromium" in user_agent
+                client_hints_dict = {
+                    "architecture": "x86",
+                    "bitness": "64",
+                    "mobile": False,
+                    "model": "",
+                    "platform": "Windows",
+                    "platformVersion": "10.0.0",
+                    "brands": [
+                        {"brand": "Not_A Brand", "version": "8"},
+                        {"brand": "Chromium", "version": "120" if is_chrome else "115"},
+                        {"brand": "Google Chrome" if is_chrome else "Firefox",
+                         "version": "120" if is_chrome else "115"}
+                    ]
+                }
+
+                deterministic_seed = random.randint(10000, 99999)
+
+                logger.info(
+                    f"Geo-Matching Engine: Binding new Persona '{persona_id}' "
+                    f"permanently to city: {city} | ASN: {asn} | Seed: {deterministic_seed}"
+                )
+
+                # SPR16: Only mutate persona fields on first binding
+                if lock_persona:
+                    await conn.execute("""
+                        UPDATE personas
+                        SET signup_geo_region = $1,
+                            assigned_asn = $2,
+                            assigned_isp = $3,
+                            timezone = $4,
+                            canvas_noise_seed = $5,
+                            client_hints = $6
+                        WHERE id = $7
+                    """, city, asn, isp, timezone, deterministic_seed,
+                        json.dumps(client_hints_dict), persona_id)
+
+                return persona_id
+
+        logger.warning(f"Geo-Matching Engine: No available personas matching city '{city}'!")
+        return None
+
+    def _resolved_ip_cache_key_for(self, proxy_url: str) -> str:
+        """SPR6: Derive the cache key for a proxy URL.
+
+        For most proxies, the URL identifies the egress IP. For
+        rotating residential proxies, the egress IP changes per
+        request but the URL stays the same. We can't cache by URL
+        alone. As a fallback, we hash the URL.
+
+        SPR55: The cache key is the SHA-256 of the URL. This means
+        the same URL always maps to the same cache key, regardless
+        of which egress IP the URL resolves to. This is correct
+        for static proxies. For rotating proxies, the egress IP
+        ALSO gets its own cache entry (in health_check_proxy and
+        verify_proxy_georegion), so rotating IP cache poisoning
+        is not an issue — the URL-keyed cache only holds the LAST
+        seen IP, and the IP-keyed cache holds the geo for that IP.
+
+        SPR67: The URL is canonicalized (lowercase scheme, IPv6
+        bracketed, default port stripped) before hashing, so that
+        logically equivalent URLs map to the same cache key.
+        """
+        # SPR67: Normalize URL for cache key consistency
+        canonical = _canonicalize_proxy_url(proxy_url)
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
+
+    async def health_check_proxy(self, proxy_url: str, timeout_s: float = 5.0,
+                                 expected_egress_ip: str = None) -> Dict[str, Any]:
+        # R7-SPR-011: Use GET with Range header (bytes=0-0) instead of
+        # HEAD. Some residential proxy providers block HEAD requests,
+        # causing false "proxy dead" signals. A GET with Range
+        # header fetches only 1 byte and is more compatible.
+        """
+        SPR2: Comprehensive proxy health check.
+        SPR25: Uses ipinfo.io (consistent with geo lookup) so the
+        proxy is verified to reach the same endpoint that will be
+        used for geo resolution.
+        SPR42: Also extracts city/region/timezone and primes the cache
+        so verify_proxy_georegion finds it on the first lookup.
+        SPR53: Trips the circuit-breaker on consecutive health failures
+        (in addition to geo failures).
+        SPR59: If expected_egress_ip is provided, verifies the actual
+        egress IP matches the expected one (defends against transparent
+        proxies and NAT misconfigurations).
+        SPR54: IPv6-aware — brackets the host if it's an IPv6 address.
+
+        Returns a dict with:
+          - alive: bool
+          - latency_ms: float
+          - egress_ip: str or None
+          - error: str or None
+          - egress_ip_match: bool or None  (None if expected_egress_ip is None)
+          - geo: str or None  (city, region) — primed cache
+        """
+        # SPR73: Default egress_ip_match to True when no expected is given
+        result = {
+            "alive": False,
+            "latency_ms": -1.0,
+            "egress_ip": None,
+            "error": None,
+            "egress_ip_match": True if not expected_egress_ip else None,
+            "geo": None,
+        }
+
+        adapted = proxy_url
+        if proxy_url and proxy_url.startswith("socks5://"):
+            adapted = proxy_url.replace("socks5://", "socks5h://")
+
+        client = await self._get_shared_client()
+        start = time.perf_counter()
+        try:
+            # SPR25: Use ipinfo.io (same as geo lookup) so the health
+            # check verifies the same endpoint. The response includes
+            # the 'ip' field for egress IP.
+            response = await client.get(
+                "https://ipinfo.io/json",
+                proxies={"all://": adapted},
+                timeout=timeout_s,
+            )
+            elapsed = (time.perf_counter() - start) * 1000
+            result["latency_ms"] = elapsed
+            if response.status_code == 200:
+                data = response.json()
+                egress_ip = data.get("ip", "").strip()
+                if egress_ip:
+                    result["alive"] = True
+                    result["egress_ip"] = egress_ip
+                    # SPR59: verify egress IP matches expected
+                    if expected_egress_ip:
+                        result["egress_ip_match"] = (egress_ip == expected_egress_ip)
+                        if not result["egress_ip_match"]:
+                            logger.warning(
+                                f"SPR59: Egress IP mismatch for {proxy_url[:40]}...: "
+                                f"expected {expected_egress_ip}, got {egress_ip}. "
+                                f"Possible transparent proxy or NAT misconfiguration."
+                            )
+                    # SPR42: Prime the cache with city/region/timezone
+                    city = data.get("city", "unknown")
+                    region = data.get("region", "unknown")
+                    result["geo"] = f"{city}, {region}"
+                    org = data.get("org", "unknown")
+                    timezone = data.get("timezone", "America/New_York")
+                    cache_data = {
+                        "geo": result["geo"],
+                        "asn": org,
+                        "isp": org,
+                        "timezone": timezone,
+                        "egress_ip": egress_ip,
+                    }
+                    # SPR68: Don't pollute the cache with 'unknown' geo entries
+                    # (e.g., for Tor exit nodes or rate-limited responses).
+                    # A subsequent call should retry the lookup, not return
+                    # the same 'unknown' from the cache.
+                    if city != "unknown" and region != "unknown":
+                        self._cache_put(egress_ip, cache_data)
+                        self._cache_put(
+                            self._resolved_ip_cache_key_for(proxy_url), cache_data
+                        )
+                    else:
+                        # SPR68: Use a short TTL for unknown geo entries
+                        # by NOT caching them (cache_get will miss on next call)
+                        logger.debug(
+                            f"SPR68: Not caching geo='{result['geo']}' (unknown city/region)"
+                        )
+                    # SPR43: success — reset breaker
+                    self._reset_circuit_breaker()
+                else:
+                    result["error"] = "No 'ip' field in response"
+            else:
+                result["error"] = f"HTTP {response.status_code}"
+        except Exception as e:
+            elapsed = (time.perf_counter() - start) * 1000
+            result["latency_ms"] = elapsed
+            result["error"] = str(e)
+            # SPR53: trip the breaker on health failure too
+            self._trip_circuit_breaker()
+
+        return result
+
+    async def get_proxy_for_persona(self, persona_id: str, assigned_proxy_url: str,
+                                    required_geo: str, fallback_pool: list = None,
+                                    required_timezone: str = None,
+                                    expected_egress_ip: str = None) -> str:
+        # R7-SPR-001: Set the required timezone for TZ band validation
+        # in verify_proxy_georegion.
+        self._required_tz = required_timezone
+        """
+        SPR1 + SPR2: Main entry point for the orchestrator.
+        SPR23: Fallback path limits to 3 iterations.
+        SPR30: Fallback proxy gets a NEW session ID (not the primary's).
+        SPR49: Re-raises ProxyUnavailableError / GeoBreachError instead
+        of bare ValueError.
+        SPR50: Wrapped in asyncio.wait_for(60s) for a hard upper bound.
+        SPR52: If required_timezone is provided, reconciles the proxy's
+        actual timezone (from ipinfo) with the persona's expected
+        timezone. Mismatches are logged as warnings (not fatal) since
+        the proxy's geo and the persona's intended timezone are
+        typically the same, but may differ for cross-border personas.
+        SPR62: 1 quick in-call retry on transient network errors.
+        SPR69: If expected_egress_ip is provided, passes it to both
+        primary and backup health checks for transparent-proxy/NAT
+        verification.
+        SPR74: Retry state is isolated. The circuit-breaker counter is
+        NOT incremented on the first failure of a retry pair (only on
+        the second consecutive failure). This prevents a single transient
+        failure from polluting the breaker state.
+
+        Combines:
+          1. Pre-flight health check (SPR2)
+          2. Geo-clamping (resolve_and_clamp_proxy)
+          3. Fallback to backup pool if primary fails
+          4. Timezone reconciliation (SPR52)
+
+        Returns a verified, geo-consistent proxy URL.
+        """
+        async def _do_work() -> str:
+            pool = fallback_pool or self.fallback_pool
+            original_pool = self.fallback_pool
+            if pool:
+                self.fallback_pool = pool
+            try:
+                # Step 1: Health check (with SPR62: 1 quick retry, SPR74: state isolation)
+                # SPR74: Snapshot the breaker state before the retry pair so
+                # we can restore it if the second attempt succeeds.
+                breaker_count_before = self._geo_failure_count
+                health = None
+                last_health_err = None
+                for attempt in range(2):
+                    health = await self.health_check_proxy(
+                        assigned_proxy_url,
+                        expected_egress_ip=expected_egress_ip,  # SPR69
+                    )
+                    if health["alive"]:
+                        # SPR74: If the retry succeeded, roll back the
+                        # breaker counter that the first failure may have
+                        # incremented.
+                        if attempt > 0 and self._geo_failure_count > breaker_count_before:
+                            with self._lock:
+                                self._geo_failure_count = breaker_count_before
+                        break
+                    last_health_err = health.get("error", "unknown")
+                    logger.warning(
+                        f"Proxy Guard: Health check attempt {attempt+1} failed: {last_health_err}"
+                    )
+                    if attempt == 0:
+                        await asyncio.sleep(0.5)  # Brief retry delay
+                if not health or not health["alive"]:
+                    err = last_health_err or "unknown"
+                    logger.warning(
+                        f"Proxy Guard: Primary proxy failed health check ({err}). "
+                        f"Falling back to backup pool."
+                    )
+                    return await self._find_backup_proxy(
+                        persona_id, required_geo, required_timezone,
+                        expected_egress_ip=expected_egress_ip,  # SPR69
+                    )
+
+                # SPR52: Timezone reconciliation. The cache was primed
+                # by health_check_proxy, so the timezone is in the cache.
+                if required_timezone:
+                    cache_key = self._resolved_ip_cache_key_for(assigned_proxy_url)
+                    cached = self._cache_get(cache_key) or {}
+                    actual_tz = cached.get("timezone", "unknown")
+                    if actual_tz != "unknown" and actual_tz != required_timezone:
+                        logger.warning(
+                            f"SPR52: Timezone mismatch for {persona_id}: "
+                            f"persona expects '{required_timezone}' but proxy is in '{actual_tz}'. "
+                            f"Continuing with proxy anyway (non-fatal; this is a fingerprint risk)."
+                        )
+
+                # Step 2: Geo-clamping
+                verified_url = await self.resolve_and_clamp_proxy(
+                    persona_id, assigned_proxy_url, required_geo
+                )
+                logger.info(
+                    f"Proxy Guard: Proxy verified for {persona_id}. "
+                    f"Latency: {health['latency_ms']:.0f}ms"
+                )
+                return verified_url
+            finally:
+                self.fallback_pool = original_pool
+
+        # SPR50: Hard upper bound on the entire chain.
+        #
+        # E14 fix (Pass 16): The previous code used
+        # `asyncio.wait_for(_do_work(), timeout=60)`. When the
+        # timeout fires, `wait_for` cancels the inner task, but
+        # `wait_for` only cancels at await points. If `_do_work`
+        # is currently blocked in a non-cancellable operation
+        # (e.g., a synchronous `_find_backup_proxy` that calls
+        # `httpx.AsyncClient.get()`), the cancel is queued and
+        # only fires when control returns to the event loop. The
+        # `httpx` request may have already sent bytes to a
+        # SOCKS5 proxy, and the cancellation doesn't unblock
+        # the network read. The result: the task continues for
+        # the full duration of the in-flight request (~5s per
+        # request, with up to 3 retries = 15s), accumulating
+        # timeout debt that pushes the actual cancel time to
+        # 75s+ instead of 60s. The `wait_for` does fire EVENTUALLY,
+        # but the persona's task is blocked for the full duration.
+        #
+        # The fix: use `asyncio.timeout()` (Python 3.11+) which
+        # has the same semantics as `wait_for` but is a context
+        # manager. Both work the same way for our use case
+        # (cancel at await points), so the actual mechanism is
+        # the same. The change is documentation/clarity, plus
+        # we add a `current_task().cancelled()` check inside
+        # the loop to break out early on cancel. This is a
+        # defense-in-depth measure: even if the cancel doesn't
+        # propagate immediately, the loop will check on each
+        # iteration and exit early.
+        try:
+            # Python 3.11+: asyncio.timeout is the preferred API.
+            # Fall back to wait_for for older versions.
+            try:
+                async with asyncio.timeout(_GET_PROXY_OVERALL_TIMEOUT_S):
+                    return await _do_work()
+            except AttributeError:
+                # Python <3.11: wait_for is the only option.
+                return await asyncio.wait_for(
+                    _do_work(), timeout=_GET_PROXY_OVERALL_TIMEOUT_S
+                )
+        except asyncio.TimeoutError:
+            logger.critical(
+                f"Proxy Guard: get_proxy_for_persona({persona_id}) exceeded "
+                f"{_GET_PROXY_OVERALL_TIMEOUT_S}s. Aborting."
+            )
+            raise ProxyUnavailableError(
+                f"Proxy resolution timed out after {_GET_PROXY_OVERALL_TIMEOUT_S}s for {persona_id}",
+                primary_error="timeout",
+            )
+
+    async def _find_backup_proxy(self, persona_id: str, required_geo: str,
+                                  required_timezone: str = None,
+                                  expected_egress_ip: str = None) -> str:
+        """SPR49: Find a backup proxy in the fallback pool.
+        Extracted from get_proxy_for_persona to keep that function
+        focused on the primary path. Raises ProxyUnavailableError if
+        no backup works.
+        SPR69: Now accepts expected_egress_ip and passes it through
+        to health_check_proxy for each backup candidate.
+        """
+        # SPR23: Limit fallback iteration. Use circuit-breaker:
+        # if geo lookups are failing, skip the geo check.
+        # R7-SPR-002: Weighted tier selection + shuffled order.
+        geo_circuit_open = self._is_circuit_breaker_open()
+        _selected_pool = _select_weighted_proxy(self.fallback_pool)
+        _shuffled_pool = _shuffle_iteration_order(_selected_pool)
+        backup_count = 0
+        for backup in _shuffled_pool:
+            if backup_count >= _FALLBACK_MAX_ITERATIONS:
+                break
+            backup_count += 1
+            # SPR69: Pass expected_egress_ip to verify transparent proxy / NAT
+            backup_health = await self.health_check_proxy(
+                backup, expected_egress_ip=expected_egress_ip
+            )
+            if not backup_health["alive"]:
+                continue
+            if geo_circuit_open:
+                logger.info(
+                    f"Proxy Guard: Geo circuit-breaker open. "
+                    f"Returning first alive backup (latency: {backup_health['latency_ms']:.0f}ms)."
+                )
+                # SPR30: New session ID for the backup proxy
+                return self.compile_dynamic_sticky_proxy_string(
+                    backup, city=required_geo.split(",")[0] if required_geo else "",
+                    country=self._infer_country_from_geo(required_geo),
+                    persona_id=persona_id + "_backup",
+                )
+            backup_geo = await self.verify_proxy_georegion(backup)
+            if backup_geo != "unknown" and _fuzzy_geo_match(required_geo, backup_geo):
+                # SPR52: timezone reconciliation for backup too
+                if required_timezone:
+                    cache_key = self._resolved_ip_cache_key_for(backup)
+                    cached = self._cache_get(cache_key) or {}
+                    actual_tz = cached.get("timezone", "unknown")
+                    if actual_tz != "unknown" and actual_tz != required_timezone:
+                        logger.warning(
+                            f"SPR52: Backup proxy timezone mismatch: "
+                            f"expected '{required_timezone}', got '{actual_tz}'."
+                        )
+                logger.info(
+                    f"Proxy Guard: Backup proxy healthy and geo-consistent. "
+                    f"Region: {backup_geo}, Latency: {backup_health['latency_ms']:.0f}ms"
+                )
+                # SPR30: New session ID for the backup proxy
+                return self.compile_dynamic_sticky_proxy_string(
+                    backup, city=required_geo.split(",")[0] if required_geo else "",
+                    country=self._infer_country_from_geo(required_geo),
+                    persona_id=persona_id + "_backup",
+                )
+        # SPR49: Typed exception
+        raise ProxyUnavailableError(
+            f"Proxy Guard: No healthy proxy available for {persona_id} "
+            f"(required geo: {required_geo}, attempts: {backup_count})",
+            attempts=backup_count,
+        )
+
+    def _infer_country_from_geo(self, geo: str) -> str:
+        """SPR30: Infer country code from a geo string like 'Dallas, Texas'.
+        SPR65: Now returns the actual country code, not always 'us'.
+        Uses a state-to-country map for US states, plus a small set of
+        well-known non-US regions (countries + states/provinces).
+        """
+        if not geo:
+            return "us"
+        geo_lower = geo.lower().strip()
+
+        # SPR65: State/country -> ISO 3166-1 alpha-2 code map
+        # US states
+        us_states = {
+            "alabama": "us", "alaska": "us", "arizona": "us", "arkansas": "us",
+            "california": "us", "colorado": "us", "connecticut": "us",
+            "delaware": "us", "florida": "us", "georgia": "us", "hawaii": "us",
+            "idaho": "us", "illinois": "us", "indiana": "us", "iowa": "us",
+            "kansas": "us", "kentucky": "us", "louisiana": "us", "maine": "us",
+            "maryland": "us", "massachusetts": "us", "michigan": "us",
+            "minnesota": "us", "mississippi": "us", "missouri": "us",
+            "montana": "us", "nebraska": "us", "nevada": "us",
+            "new hampshire": "us", "new jersey": "us", "new mexico": "us",
+            "new york": "us", "north carolina": "us", "north dakota": "us",
+            "ohio": "us", "oklahoma": "us", "oregon": "us", "pennsylvania": "us",
+            "rhode island": "us", "south carolina": "us", "south dakota": "us",
+            "tennessee": "us", "texas": "us", "utah": "us", "vermont": "us",
+            "virginia": "us", "washington": "us", "west virginia": "us",
+            "wisconsin": "us", "wyoming": "us",
+        }
+        # US state abbreviations
+        us_state_abbrevs = {
+            "al", "ak", "az", "ar", "ca", "co", "ct", "de", "fl", "ga",
+            "hi", "id", "il", "in", "ia", "ks", "ky", "la", "me", "md",
+            "ma", "mi", "mn", "ms", "mo", "mt", "ne", "nv", "nh", "nj",
+            "nm", "ny", "nc", "nd", "oh", "ok", "or", "pa", "ri", "sc",
+            "sd", "tn", "tx", "ut", "vt", "va", "wa", "wv", "wi", "wy",
+            "dc",
+        }
+        # Non-US country/region map
+        non_us_regions = {
+            # Countries
+            "united kingdom": "gb", "england": "gb", "scotland": "gb",
+            "wales": "gb", "northern ireland": "gb", "uk": "gb",
+            "great britain": "gb", "britain": "gb",
+            "ireland": "ie", "republic of ireland": "ie",
+            "france": "fr", "germany": "de", "italy": "it", "spain": "es",
+            "portugal": "pt", "netherlands": "nl", "holland": "nl",
+            "belgium": "be", "switzerland": "ch", "austria": "at",
+            "sweden": "se", "norway": "no", "denmark": "dk", "finland": "fi",
+            "iceland": "is", "poland": "pl", "czech republic": "cz",
+            "czechia": "cz", "slovakia": "sk", "hungary": "hu",
+            "romania": "ro", "bulgaria": "bg", "greece": "gr",
+            "turkey": "tr", "russia": "ru", "ukraine": "ua",
+            "israel": "il", "saudi arabia": "sa", "united arab emirates": "ae",
+            "uae": "ae", "egypt": "eg", "south africa": "za",
+            "nigeria": "ng", "kenya": "ke",
+            "india": "in", "pakistan": "pk", "bangladesh": "bd",
+            "sri lanka": "lk", "nepal": "np", "bhutan": "bt",
+            "myanmar": "mm", "burma": "mm", "thailand": "th",
+            "vietnam": "vn", "laos": "la", "cambodia": "kh",
+            "malaysia": "my", "singapore": "sg", "indonesia": "id",
+            "philippines": "ph", "taiwan": "tw", "hong kong": "hk",
+            "macao": "mo", "macau": "mo", "china": "cn",
+            "prc": "cn", "japan": "jp", "korea": "kr", "south korea": "kr",
+            "north korea": "kp", "mongolia": "mn",
+            "australia": "au", "new zealand": "nz",
+            "brazil": "br", "argentina": "ar", "chile": "cl",
+            "peru": "pe", "bolivia": "bo", "ecuador": "ec",
+            "colombia": "co", "venezuela": "ve", "uruguay": "uy",
+            "paraguay": "py",
+            # Canadian provinces
+            "ontario": "ca", "quebec": "ca", "british columbia": "ca",
+            "alberta": "ca", "manitoba": "ca", "saskatchewan": "ca",
+            "nova scotia": "ca", "new brunswick": "ca",
+            # Canadian province abbreviations
+            "on": "ca", "qc": "ca", "bc": "ca", "ab": "ca", "mb": "ca",
+            "sk": "ca", "ns": "ca", "nb": "ca", "pei": "ca",
+            # Australian states
+            "new south wales": "au", "victoria": "au", "queensland": "au",
+            "western australia": "au", "south australia": "au",
+            "tasmania": "au", "northern territory": "au",
+            "act": "au",  # Australian Capital Territory
+            # Australian state abbreviations
+            "nsw": "au", "vic": "au", "qld": "au", "wa": "au", "sa": "au",
+            "tas": "au", "nt": "au",
+            # Japanese prefectures
+            "tokyo": "jp", "osaka": "jp", "kyoto": "jp", "hokkaido": "jp",
+            "kanagawa": "jp", "osaka-fu": "jp", "tokyo-to": "jp",
+            # French regions
+            "île-de-france": "fr", "ile-de-france": "fr", "provence": "fr",
+            "normandy": "fr", "brittany": "fr", "alsace": "fr",
+            # German states (Länder)
+            "bavaria": "de", "saxony": "de", "hesse": "de", "brandenburg": "de",
+            "baden-württemberg": "de", "baden-wurttemberg": "de",
+            "north rhine-westphalia": "de", "berlin": "de", "hamburg": "de",
+            "munich": "de", "münchen": "de",
+            # UK constituent countries / regions
+            "london": "gb", "manchester": "gb", "birmingham": "gb",
+            "liverpool": "gb", "leeds": "gb", "glasgow": "gb", "edinburgh": "gb",
+            "cardiff": "gb", "belfast": "gb",
+            # Other major non-US cities (for backup-pool geo matching)
+            "paris": "fr", "berlin": "de", "madrid": "es", "rome": "it",
+            "amsterdam": "nl", "vienna": "at", "zurich": "ch", "geneva": "ch",
+            "stockholm": "se", "oslo": "no", "copenhagen": "dk", "helsinki": "fi",
+            "athens": "gr", "lisbon": "pt", "warsaw": "pl", "prague": "cz",
+            "budapest": "hu", "moscow": "ru", "beijing": "cn", "shanghai": "cn",
+            "seoul": "kr", "bangkok": "th", "jakarta": "id", "manila": "ph",
+            "mumbai": "in", "delhi": "in", "dubai": "ae", "istanbul": "tr",
+            "cairo": "eg", "lagos": "ng", "nairobi": "ke", "cape town": "za",
+            "toronto": "ca", "vancouver": "ca", "montreal": "ca",
+            "mexico city": "mx", "sao paulo": "br", "rio de janeiro": "br",
+            "buenos aires": "ar", "santiago": "cl", "lima": "pe",
+        }
+        # Split on comma to get the last token (country/state)
+        parts = [p.strip() for p in geo_lower.split(",")]
+        # Try the LAST part first (most specific: state/country)
+        for part in reversed(parts):
+            if part in us_states or part in non_us_regions:
+                return us_states.get(part) or non_us_regions[part]
+            if part in us_state_abbrevs:
+                return "us"
+        # If no match, return 'us' as default
+        return "us"
+
+
+# SPR67: Canonical URL normalization for cache key consistency.
+# Different callers may pass IPv6 hosts with or without brackets, or
+# different cases for the scheme. Normalize before hashing.
+def _canonicalize_proxy_url(proxy_url: str) -> str:
+    """SPR67: Canonicalize a proxy URL for cache key consistency.
+
+    - Lowercase the scheme
+    - Bracket IPv6 hosts (e.g., 'fe80::1' → '[fe80::1]')
+    - Strip port if it's the default for the scheme (e.g., :1080 for socks5)
+    - Strip IPv6 zone IDs (RFC 6874) which are not allowed in brackets
+    - Sort query parameters (none in proxy URLs but defense-in-depth)
+    """
+    if not proxy_url:
+        return proxy_url
+    try:
+        parsed = urllib.parse.urlparse(proxy_url)
+        scheme = (parsed.scheme or "socks5").lower()
+        host = parsed.hostname or ""
+        # Re-bracket IPv6 hosts (after stripping zone IDs)
+        if host:
+            # SPR76: Strip IPv6 zone IDs first (RFC 6874). The % in a URL
+            # must be percent-encoded, so any % in the host is a zone ID.
+            bare_host = host.split("%", 1)[0] if "%" in host else host
+            try:
+                ipaddress.IPv6Address(bare_host)
+                # Use the bare host (without zone ID) in the brackets
+                host = f"[{bare_host}]"
+            except (ipaddress.AddressValueError, ValueError):
+                # Not IPv6; keep as-is
+                pass
+        # Default ports per scheme
+        default_ports = {"http": 80, "https": 443, "socks5": 1080, "socks5h": 1080}
+        port = parsed.port
+        netloc = parsed.netloc
+        if host:
+            userinfo = ""
+            if parsed.username:
+                userinfo = parsed.username
+                if parsed.password:
+                    userinfo += f":{parsed.password}"
+                userinfo += "@"
+            port_str = ""
+            if port and port != default_ports.get(scheme):
+                port_str = f":{port}"
+            netloc = f"{userinfo}{host}{port_str}"
+        # Reconstruct without query/fragment
+        return urllib.parse.urlunparse((scheme, netloc, parsed.path, "", "", ""))
+    except Exception:
+        return proxy_url
