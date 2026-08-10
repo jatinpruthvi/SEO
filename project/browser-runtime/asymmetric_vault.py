@@ -45,9 +45,14 @@ class AsymmetricSessionVault:
     # Real session cookies include many variants (__Secure-*, __Host-*,
     # provider-specific names). The new filter uses these as a
     # "fast path" plus a heuristic for unknown cookies.
+    # BUG-7 FIX: 'sid' was duplicated (appeared twice). The second entry was
+    # likely intended to be 'session', which was missing from the filter,
+    # causing some session cookies to be incorrectly treated as non-essential.
+    # Python frozensets silently deduplicate so there was no runtime error,
+    # but 'session' was never filtered. Both are now present exactly once.
     _ESSENTIAL_COOKIE_NAMES = frozenset({
         'sessionid', 'reddit_session', 'token', 'auth', 'login', 'sid',
-        'session', 'sid', 'phpsessid', 'jsessionid', 'asp.net_sessionid',
+        'session', 'phpsessid', 'jsessionid', 'asp.net_sessionid',
         'cf_clearance', 'sb_session', 'aws-alb', 'alb',
     })
 
