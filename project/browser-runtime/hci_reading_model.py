@@ -89,7 +89,24 @@ async def execute_smooth_momentum_scroll(page, scroll_y: int, friction_coefficie
     # envelope wrap] unsupported` when calling this function.
     # SHA-256 is always available. The 32-bit truncation is
     # preserved (we only need a seed, not a hash output).
-    _friction_rng = random.Random(int(hashlib.sha256(f"scroll_friction:{scroll_y}".encode()).hexdigest()[:8], 16))
+    #
+    # BUG-4 FIX: The previous seed used only scroll_y, so every persona
+    # scrolling by the same distance got identical friction/velocity values —
+    # exactly the cross-persona fingerprint correlation the scroll simulation
+    # is designed to prevent. Include persona_id in the seed so each persona
+    # has unique scroll physics regardless of scroll distance.
+    _persona_id_for_seed = None
+    try:
+        _persona_id_for_seed = (
+            getattr(page.context, "_sre_persona_id", None)
+            or getattr(page.context, "persona_id", None)
+            or "unknown"
+        )
+    except Exception:
+        _persona_id_for_seed = "unknown"
+    _friction_rng = random.Random(int(hashlib.sha256(
+        f"scroll_friction:{_persona_id_for_seed}:{scroll_y}".encode()
+    ).hexdigest()[:8], 16))
     _friction_base = 0.88 + _friction_rng.random() * 0.06  # 0.88-0.94
 
     # CHAMELEON: Initial velocity variation. Real scroll inertia is
@@ -108,7 +125,10 @@ async def execute_smooth_momentum_scroll(page, scroll_y: int, friction_coefficie
 
     # CHAMELEON: per-frame jitter (real trackpads have ±1ms jitter)
     # M13 fix: Use SHA-256 instead of MD5 (FIPS compatibility).
-    _frame_rng = random.Random(int(hashlib.sha256(f"scroll_frame:{scroll_y}".encode()).hexdigest()[:8], 16))
+    # BUG-4 FIX: Include persona_id in frame RNG seed (same fix as _friction_rng above).
+    _frame_rng = random.Random(int(hashlib.sha256(
+        f"scroll_frame:{_persona_id_for_seed}:{scroll_y}".encode()
+    ).hexdigest()[:8], 16))
 
     # R7-DEEP-AUDIT-2 (Pass 14) HIGH (N1): Per-persona tremor RNG.
     # The previous code used `random.choice([-1, 0, 1])` (the global

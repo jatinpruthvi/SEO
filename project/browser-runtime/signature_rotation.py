@@ -86,13 +86,31 @@ class SignatureRotator:
             self.log_dir = log_dir
         else:
             # Try /var/log/cloak first (production), fall back to
-            # ~/.local/share/cloak (dev) if permission denied
+            # ~/.local/share/cloak (dev) if permission denied.
+            # BUG-8 FIX: The fallback path mkdir was NOT wrapped in
+            # try/except. In containers with a read-only root filesystem
+            # (or where Path.home() itself fails), the fallback would
+            # raise an unhandled PermissionError/OSError, crashing
+            # SignatureRotator.__init__ entirely. We now wrap the
+            # fallback in its own try/except and fall back to a tmpfs
+            # path (/tmp/cloak) as a last resort.
             try:
                 self.log_dir = Path("/var/log/cloak")
                 self.log_dir.mkdir(parents=True, exist_ok=True)
             except (OSError, PermissionError):
-                self.log_dir = Path.home() / ".local" / "share" / "cloak"
-                self.log_dir.mkdir(parents=True, exist_ok=True)
+                try:
+                    self.log_dir = Path.home() / ".local" / "share" / "cloak"
+                    self.log_dir.mkdir(parents=True, exist_ok=True)
+                except (OSError, PermissionError):
+                    # Last resort: use /tmp which is always writable
+                    self.log_dir = Path("/tmp/cloak")
+                    try:
+                        self.log_dir.mkdir(parents=True, exist_ok=True)
+                    except Exception:
+                        # If even /tmp fails (extremely unusual), operate
+                        # without a log dir. Rotation events will be
+                        # in-memory only (no persistent audit trail).
+                        self.log_dir = None
         self._current_salt: int = self._compute_monthly_salt()
         self._session_id: str = ""
         self._rotation_log: List[Dict[str, Any]] = []
@@ -230,13 +248,14 @@ class SignatureRotator:
             **kwargs
         }
         self._rotation_log.append(event)
-        # Also persist to file
-        try:
-            log_file = self.log_dir / "signature_rotations.jsonl"
-            with open(log_file, "a") as f:
-                f.write(json.dumps(event) + "\n")
-        except OSError:
-            pass
+        # Also persist to file (BUG-8: guard against log_dir being None)
+        if self.log_dir is not None:
+            try:
+                log_file = self.log_dir / "signature_rotations.jsonl"
+                with open(log_file, "a") as f:
+                    f.write(json.dumps(event) + "\n")
+            except OSError:
+                pass
 
     def get_stats(self) -> Dict[str, Any]:
         """Returns current rotation stats."""

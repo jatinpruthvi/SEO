@@ -100,7 +100,16 @@ def _get_persona_rng(persona_id):
         _persona_rngs[persona_id] = random.Random(seed)
     return _persona_rngs[persona_id]
 import re as _re  # KE3: for word-boundary matching
-import numpy as np
+# BUG-3 FIX: The previous bare `import numpy as np` had no fallback and would
+# raise ImportError on any system without numpy, crashing the orchestrator at
+# startup (it declares keyboard_emulator mandatory and exits with code 7 on
+# ImportError). This is consistent with behavioral_entropy.py's BE1 pattern.
+try:
+    import numpy as np
+    _NUMPY_AVAILABLE = True
+except ImportError:
+    np = None
+    _NUMPY_AVAILABLE = False
 from humanized_movement import get_muscle_profile
 
 # High-frequency English digraphs that exhibit polyphonic motor rollover in human typing

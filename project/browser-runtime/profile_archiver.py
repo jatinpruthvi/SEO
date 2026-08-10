@@ -15,6 +15,18 @@
 #   PRA-4 - Case-insensitive pruning. The old code matched "Cache" but
 #           not "cache" or "GPUCache" (which on macOS is lowercase
 #           "gpucache"). Now we use case-insensitive matching.
+#
+# BUGFIX (R8):
+#   BUG-1 - CRITICAL: Pruning was completely broken. The os.walk loop
+#           did `dirs[:] = [d for d in dirs if d.lower() not in prune_dirs]`
+#           (keeping non-prune dirs), then `for d in list(dirs): if
+#           d.lower() in prune_dirs:` which is ALWAYS FALSE on the
+#           already-filtered list — shutil.rmtree was dead code. Worse,
+#           `tar.add(source_dir)` archived the entire tree independently
+#           of the walk, so all cache directories were included unchanged.
+#           Fix: delete prune dirs directly by name before creating the
+#           tar. This guarantees they are removed from disk and cannot
+#           appear in the archive.
 
 import os
 import tarfile
@@ -59,17 +71,23 @@ class HardenedProfileArchiver:
         encrypted_written = False
         try:
             logger.info(f"Archiver: Pruning redundant cache directories in: {source_dir}")
-            # 1. Prune massive telemetry, cache, and rendering folders
+            # BUG-1 FIX: Delete prune dirs directly by scanning each level of the
+            # directory tree. The previous os.walk approach modified dirs[:] to
+            # skip traversal but never called shutil.rmtree (dead code), AND
+            # tar.add() archived everything regardless. We now walk the tree and
+            # delete matching directories before the tar is created.
             for root, dirs, files in os.walk(source_dir, topdown=True):
-                # Filter directories in-place to prune them (case-insensitive)
+                to_delete = [d for d in dirs if d.lower() in prune_dirs]
+                # Remove pruned dirs from further traversal
                 dirs[:] = [d for d in dirs if d.lower() not in prune_dirs]
-                for d in list(dirs):
-                    if d.lower() in prune_dirs:
-                        dir_path = os.path.join(root, d)
-                        try:
-                            shutil.rmtree(dir_path, ignore_errors=True)
-                        except Exception:
-                            pass
+                # Actually delete them from disk so tar.add() won't include them
+                for d in to_delete:
+                    dir_path = os.path.join(root, d)
+                    try:
+                        shutil.rmtree(dir_path, ignore_errors=True)
+                        logger.debug(f"Archiver: Pruned cache dir: {dir_path}")
+                    except Exception as _prune_err:
+                        logger.warning(f"Archiver: Could not prune {dir_path}: {_prune_err}")
 
             # Prune massive logging/telemetry files
             for root, _, files in os.walk(source_dir):

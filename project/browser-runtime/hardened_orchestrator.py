@@ -254,7 +254,16 @@ if _keyboard_emulator_module is None:
 # Module-level to persist across task runs. Each persona_id has its own
 # dictionary of site_label -> random.Random, ensuring per-call-site
 # determinism while persisting across launches.
-_persona_delay_rng_registries: Dict[str, Dict[str, random.Random]] = {}
+#
+# BUG-5 FIX: The original dict had no eviction policy. Over thousands of
+# persona rotations (a long-running daemon) this dict would grow without
+# bound, leaking memory indefinitely. We use collections.OrderedDict with
+# a FIFO cap of 1000 entries — consistent with the _profile_cache cap in
+# humanized_movement.py. 1000 entries covers ~50x the MAX_CONCURRENT_PERSONAS
+# count, giving plenty of headroom for in-flight and recently-retired personas.
+import collections as _collections
+_persona_delay_rng_registries: "collections.OrderedDict[str, Dict[str, random.Random]]" = _collections.OrderedDict()
+_PERSONA_DELAY_RNG_REGISTRY_MAX = 1000
 
 DB_PASSWD = os.environ["DB_PASSWD"]
 ENCRYPTION_KEY = os.environ["ENCRYPTION_KEY"]
@@ -352,12 +361,33 @@ PERSONA_QUIESCENCE_BEFORE_TASK_S_MAX = _safe_getenv_int("PERSONA_QUIESCENCE_BEFO
 POST_TASK_COOLDOWN_S_MIN = _safe_getenv_int("POST_TASK_COOLDOWN_S_MIN", 300, min_value=1)
 POST_TASK_COOLDOWN_S_MAX = _safe_getenv_int("POST_TASK_COOLDOWN_S_MAX", 900, min_value=1)
 
+# BUG-6 FIX: Validate that MIN < MAX for all range-pairs. An operator typo
+# such as QUIESCENCE_MIN=200 / QUIESCENCE_MAX=30 would cause _human_like_delay
+# to receive min > max, producing a geometric mean outside both bounds and
+# silently yielding incorrect delay values. We fail fast at startup so the
+# misconfiguration is immediately obvious rather than silently misbehaving.
+def _assert_range(min_val: int, max_val: int, min_name: str, max_name: str) -> None:
+    if min_val > max_val:
+        _sys.stderr.write(
+            f"FATAL: {min_name}={min_val} > {max_name}={max_val}. "
+            f"MIN must be <= MAX. Check your environment variables.\n"
+        )
+        _sys.exit(9)
+
+_assert_range(PERSONA_QUIESCENCE_BEFORE_TASK_S_MIN, PERSONA_QUIESCENCE_BEFORE_TASK_S_MAX,
+              "PERSONA_QUIESCENCE_BEFORE_TASK_S_MIN", "PERSONA_QUIESCENCE_BEFORE_TASK_S_MAX")
+_assert_range(POST_TASK_COOLDOWN_S_MIN, POST_TASK_COOLDOWN_S_MAX,
+              "POST_TASK_COOLDOWN_S_MIN", "POST_TASK_COOLDOWN_S_MAX")
+# FIRST_NAV_DELAY range check is deferred until after those vars are defined (see below)
+
 # v5.0+: behavioral entropy
 BE_COMPOSITOR_JITTER_MS = _safe_getenv_float("BE_COMPOSITOR_JITTER_MS", 1.5, min_value=0.0)
 
 # v5.0+: navigation
 FIRST_NAV_DELAY_MIN_S = _safe_getenv_int("FIRST_NAV_DELAY_MIN_S", 8, min_value=1)
 FIRST_NAV_DELAY_MAX_S = _safe_getenv_int("FIRST_NAV_DELAY_MAX_S", 25, min_value=1)
+_assert_range(FIRST_NAV_DELAY_MIN_S, FIRST_NAV_DELAY_MAX_S,
+              "FIRST_NAV_DELAY_MIN_S", "FIRST_NAV_DELAY_MAX_S")
 
 # v5.0+: TLS fingerprint target
 UTLS_TARGET_HELLO = os.getenv("UTLS_TARGET_HELLO", "HelloChrome_120")
@@ -603,8 +633,15 @@ def get_socks5_url_for_persona(persona_id: str) -> str:
 # Lazy global instances
 _serializer_instance = None
 _archiver_instance = None
-_pacing_engine_instance = None
 _proxy_resolver_instance = None
+
+# BUG-9 FIX: The pacing engine was a single global singleton, so its
+# `last_load_latency` state was shared across all personas. With
+# MAX_CONCURRENT_PERSONAS=1 this is harmless, but if concurrency is
+# ever raised the latency state from persona A would pollute persona B.
+# We now keep a per-persona dict so each persona gets an independent
+# engine with its own latency history.
+_pacing_engine_instances: Dict[str, Any] = {}
 
 def get_serializer():
     """DC-19 (Pass 19): Singleton accessor for the session serializer.
@@ -634,16 +671,25 @@ def get_archiver():
         _archiver_instance = _HardenedProfileArchiver(ENCRYPTION_KEY)
     return _archiver_instance
 
-def get_pacing_engine():
-    """DC-19 (Pass 19): Singleton accessor for the dynamic pacing engine.
+def get_pacing_engine(persona_id: str = "global"):
+    """BUG-9 FIX: Per-persona pacing engine accessor.
 
-    Lazily creates a DynamicPacingEngine on first use. Returns None if
-    the engine was not importable (optional dependency).
+    Returns an independent DynamicPacingEngine for each persona_id so that
+    last_load_latency state from one persona does not bleed into another.
+    Falls back to a 'global' key for callers that don't pass a persona_id
+    (backward-compatible). Returns None if the engine was not importable.
     """
-    global _pacing_engine_instance
-    if _pacing_engine_instance is None and _DynamicPacingEngine is not None:
-        _pacing_engine_instance = _DynamicPacingEngine()
-    return _pacing_engine_instance
+    if _DynamicPacingEngine is None:
+        return None
+    if persona_id not in _pacing_engine_instances:
+        # Evict oldest entry if the registry grows beyond MAX_CONCURRENT_PERSONAS * 4.
+        # This prevents unbounded growth during long deployments with many rotations.
+        _max_engines = MAX_CONCURRENT_PERSONAS * 4 + 4
+        if len(_pacing_engine_instances) >= _max_engines:
+            oldest_key = next(iter(_pacing_engine_instances))
+            del _pacing_engine_instances[oldest_key]
+        _pacing_engine_instances[persona_id] = _DynamicPacingEngine()
+    return _pacing_engine_instances[persona_id]
 
 def get_proxy_resolver():
     """DC-19 (Pass 19): Singleton accessor for the sticky proxy resolver.
@@ -2337,6 +2383,9 @@ async def run_persona_pipeline(persona_id: str, task_name: str, task_payload: di
     # launches (the same persona always sees the same values for
     # the same call site).
     if persona_id not in _persona_delay_rng_registries:
+        # BUG-5 FIX: Evict oldest entry when cap is reached (FIFO).
+        if len(_persona_delay_rng_registries) >= _PERSONA_DELAY_RNG_REGISTRY_MAX:
+            _persona_delay_rng_registries.popitem(last=False)
         _persona_delay_rng_registries[persona_id] = {}
     _persona_delay_rng_registry = _persona_delay_rng_registries[persona_id]
 

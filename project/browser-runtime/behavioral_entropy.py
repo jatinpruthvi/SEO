@@ -491,8 +491,15 @@ class BehavioralEntropyGenerator:
         self.horizontal_drift_factor = self.rng.uniform(-2.0, 2.0)
         self.vertical_drift_factor = self.rng.uniform(-2.0, 2.0)
         
+        # BUG-10 FIX (BE49): session_task_count was a plain int set by
+        # the orchestrator at module-level, meaning all personas shared
+        # the same fatigue counter. It is now an instance attribute (as
+        # intended) that each persona increments independently via
+        # increment_session_task_count(). The orchestrator must call
+        # that method rather than setting browser.session_task_count
+        # on the browser object.
         self.session_task_count = 0
-        
+
         # BE13, BE14: PES state is now idempotent
         self._post_error_slowing = False
         self.ambient_stress_level = self.rng.uniform(0.05, 0.20)
@@ -619,6 +626,17 @@ class BehavioralEntropyGenerator:
             f"pes_remaining={self._pes_keystrokes_remaining})"
         )
     
+    def increment_session_task_count(self, delta: int = 1) -> None:
+        """BUG-10 FIX: Increment this persona's task counter.
+
+        The orchestrator must call this method on the persona's profile
+        object rather than setting a module-level counter. This ensures
+        each persona accumulates its own independent fatigue profile.
+        """
+        if not isinstance(delta, int) or delta < 0:
+            delta = 1
+        self.session_task_count += delta
+
     def apply_post_error_slowing(self, active: bool = True) -> None:
         """BE14, BE66: Idempotent. BE66: Reset counter on deactivation.
         When activating, also set the keystroke counter to 5-15 (matching
