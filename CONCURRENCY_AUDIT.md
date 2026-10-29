@@ -421,3 +421,130 @@ git diff --stat  3 files, +669 / -161 ................ OK
    engine-independent, but `FOR UPDATE SKIP LOCKED` behaviour itself has only been
    reasoned about, not observed. Run this against a real Postgres before trusting it in
    production.
+
+
+---
+
+## Part 2 - Static IPs, egress sharing, and a comment audit
+
+Follow-up question: *"we have static IPs - is there any risk that concurrent
+running will impact each other?"*
+
+**Answer: yes.** And the largest risk is worse than the C1-C10 data races, because
+it is architectural rather than a code defect.
+
+### C11 - CRITICAL - the five "distinct exits" share one upstream
+
+`docker-compose.yml` runs gost with five `-L` listeners and **one** `-F`:
+
+    -L=socks5://172.18.0.5:1081 ... -L=socks5://172.18.0.5:1085
+    -F=${UPSTREAM_RES_PROXY}
+
+In gost v2 `-L` is a listener and `-F` is the **global** upstream chain applied to
+every listener. The comment above it claimed "Each port = distinct upstream exit";
+the config never implemented that. `UPSTREAM_RES_PROXY` is a single endpoint,
+`socks5://user:pass@gate.residentialprovider.com:1080`.
+
+Consequence: `get_socks5_port_for_persona()` hashes a persona UUID into one of
+five listeners, and all five lead to the same exit. Every persona egresses from the
+same IP. That is **100% shared egress at N>=2**, not the 20%/52%/81% that five
+independent exits would produce.
+
+**Status:** the false comments are corrected in four places. The egress topology
+itself is deliberately NOT changed - distinct exits require one gost instance (or
+chain config) per upstream, which is a procurement decision, not a config tweak.
+
+### C12 - HIGH - static IP and MAC block `docker compose up --scale`
+
+`ipv4_address: 172.18.0.10` and `mac_address: 3c:6a:9d:1f:2e:8b` were hardcoded on
+the orchestrator. Two replicas request the same address -> "Address already in use".
+
+**Fix:** both removed. `172.18.0.10` was verified unreferenced by any code, script
+or config outside `docker-compose.yml`, so dropping it is safe. Docker now assigns
+both values per replica.
+
+### C13 - HIGH - `pids_limit: 64` was below the app's own budget of 128
+
+`check_pid_budget()` guards `PERSONA_PID_BUDGET = 128`, but the cgroup killed the
+container at 64 - so the application check could never fire before the cgroup did,
+and a single Chrome (~80 PIDs) was enough to trip the ceiling.
+
+**Fix:** `pids_limit: ${ORCHESTRATOR_PIDS_LIMIT:-256}`, documented as "must be >=
+PERSONA_PID_BUDGET + orchestrator overhead". Raising this does **not** raise the
+concurrency ceiling; it stops the container killing a single browser.
+
+### C14 - MEDIUM - MAC randomization was never implemented
+
+The comment claimed entrypoint.sh overrides the MAC at boot with
+`ip link set ... address`. The only `ip link` call in `entrypoint.sh` sets the MTU
+(line 941). No code ever changed the MAC. **Fix:** comment corrected; see C12.
+
+### C15 - MEDIUM - hardware identity is shared by every container
+
+Five host files are bind-mounted read-only into `/proc` and `/sys`:
+`mock_cpuinfo`, `mock_version`, `mock_dmi_id`, `mock_boot_id`, `mock_osrelease`.
+
+The comment claimed `mock_boot_id` is "rewritten on each persona rotation". No
+Python or shell code writes it: `hardened_host_os.sh` writes it **once** at
+provisioning from `$PERSONA_UUID`, makes it immutable (`chattr +i`), and every
+container mounts that same file read-only. Every container reports identical CPU
+model, kernel string, DMI and boot_id.
+
+**Fix:** comments corrected in four files. The sharing itself is left as-is.
+
+### C16 - MEDIUM - no CPU/memory headroom for a second browser
+
+`cpuset: 0`, `cpus: 0.5`, `mem_limit: 900m`. The compose comment states Chrome
+~700 MB + Python ~200 MB, which already consumes the entire allowance.
+
+### C17 - MEDIUM - a false "guarantee" that silently disabled a lock
+
+`city_persona.py` claimed its `finally` block "guarantees the FOR UPDATE row lock
+is never leaked". When `COMMIT`/`ROLLBACK` raised, the exception was swallowed as
+"non-fatal" **and** `conn._m6_in_transaction` was set to `False` regardless. The
+transaction could still be open while the flag claimed it was closed, so the next
+call would skip `BEGIN`, take no row lock, and silently disable the TOCTOU
+protection the block exists to provide.
+
+**Fix:** the flag is now cleared only when the transaction actually ended, and a
+failed `COMMIT` is logged as an error rather than a warning.
+
+---
+
+## Comment audit
+
+Swept **241** comments across `project/**/*.py` containing a verifiable claim
+(`prevents` / `guarantees` / `never` / `always` / `unique` / `distinct` /
+`isolated` / `atomic` / `fail-closed` / `correlation`), plus shell and compose
+comments.
+
+| Location | Claimed | Reality |
+|---|---|---|
+| `docker-compose.yml` header | "eliminates **all** cross-account correlation vectors" | Removes some; shared egress IP and shared identity files remain |
+| `docker-compose.yml` header | "Per-persona MAC randomization" | Never implemented (C14) |
+| `docker-compose.yml` header | "Boot-ID mount (per-persona stable fake UUID)" | One immutable host file, shared by all (C15) |
+| `docker-compose.yml` gost block | "Each port = distinct upstream exit" | All five share one `-F` (C11) |
+| `docker-compose.yml` gost block | "prevents cross-persona source IP correlation" | Same exit IP for every persona (C11) |
+| `docker-compose.yml` volumes | "orchestrator rewrites [boot_id] on each persona rotation" | Nothing rewrites it (C15) |
+| `docker-compose.yml` MAC | "entrypoint.sh can override this with `ip link set`" | No such call exists (C14) |
+| `docker-compose.yml` restart | "NEW container with a fresh boot_id" | boot_id never changes (C15) |
+| `hardened_orchestrator.py` v5-P11 | "Per-persona boot_id rotation via rewrite" | Not implemented (C15) |
+| `hardened_orchestrator.py` v5-P21 | "new container = new boot_id, new MAC, new tmpfs" | True for tmpfs/MAC now, false for boot_id |
+| `hardened_orchestrator.py` v5-P22 | "Daemon loop ... race-free" | Withdrawn; the gather is in shutdown, and C1-C10 were real races |
+| `hardened_orchestrator.py` launcher | "NEW container with a NEW boot_id" | boot_id is a constant (C15) |
+| `hardened_orchestrator.py` `get_socks5_port_for_persona` | "prevents cross-persona source IP correlation" | Unique port, shared upstream (C11) |
+| `hardened_orchestrator.py` `get_socks5_url_for_persona` | "preventing cross-persona source IP correlation" | Same (C11) |
+| `city_persona.py` `_compute_socks5_url` | "preventing cross-persona source IP correlation" | Same (C11) |
+| `city_persona.py` GAP 1.11 | "ensures each persona has a unique SOCKS5 source IP" | Unique port only (C11) |
+| `city_persona.py` M6 `finally` | "guarantees the FOR UPDATE row lock is never leaked" | Flag cleared even on failure (C17) |
+| `hardened_host_os.sh` sec.10d3 | "Mock boot_id (per-persona)"; "changes per persona" | Written once per host, then frozen (C15) |
+| `hardened_host_os.sh` `PERSONA_UUID` | "(per-persona stable)" | Generated once per host (C15) |
+
+**Spot-checked and found HONEST** (left unchanged): the socket `try/finally`
+guarantee in `is_display_ready()`; the per-container `mktemp` comment in
+`entrypoint.sh` (accurately scoped to temp paths); the DBUS machine-id
+randomization in `hardened_host_os.sh`.
+
+**Not exhaustively verified:** 241 candidate comments were triaged and the 19 above
+were checked line-by-line against the code. The remainder read as accurate, but
+only a full manual read would rule out further drift.

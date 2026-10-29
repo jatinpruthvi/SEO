@@ -178,7 +178,9 @@ echo "==========================================================================
 export HOST_TZ
 export DEBIAN_FRONTEND=noninteractive
 
-# Persona UUID for /etc/mock_boot_id (per-persona stable)
+# UUID for /etc/mock_boot_id. ACCURACY (C15): generated once per HOST and
+# then frozen, not per persona. Every container that mounts the resulting
+# file sees this same value for the life of the host.
 : "${PERSONA_UUID:=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "00000000-0000-0000-0000-000000000000")}"
 export PERSONA_UUID
 
@@ -1061,10 +1063,14 @@ else
 fi
 
 #-------------------------------------------------------------------------
-# 10d3. Mock boot_id (per-persona — container reads as /proc/sys/kernel/random/boot_id)
+# 10d3. Mock boot_id (container reads as /proc/sys/kernel/random/boot_id)
 #-------------------------------------------------------------------------
-current_section="10d3. Mock boot_id (per-persona)"
-# The persona has a per-session boot_id (changes per persona).
+current_section="10d3. Mock boot_id"
+# ACCURACY (C15): this script runs ONCE at host provisioning. It writes
+# a single value to /etc/mock_boot_id, makes it immutable, and every
+# container bind-mounts that same file read-only. It is therefore a
+# host-wide constant, NOT a per-persona or per-session value, and it
+# never changes. The container cannot rewrite it (ro mount + chattr +i).
 if [ -f /etc/mock_boot_id ]; then
     rm -f /etc/mock_boot_id
 fi

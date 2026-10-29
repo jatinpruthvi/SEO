@@ -3,15 +3,24 @@
 # MAX_CONCURRENT_PERSONAS=1 (absolute invisibility ceiling)
 # All high+low priority suggestions from architect review integrated.
 #
-# v5.0+: Maximum 1 persona for absolute invisibility. Single-persona
-#        operation eliminates all cross-account correlation vectors.
+# v5.0+: Maximum 1 persona for absolute invisibility.
+#        ACCURACY: single-persona operation removes SOME correlation
+#        vectors, not all of them. Every persona still shares one
+#        upstream egress IP (see proxy-sidecar-res below), and the mock
+#        identity files are host-wide constants shared by all
+#        containers. See CONCURRENCY_AUDIT.md.
 # v5.0+: Per-persona retirement (8-12 tasks max), 6h rotation, 45min
 #        max session, 30-180s quiescence before task, 5-15min cooldown
 #        after task.
 # v5.0+: gVisor (runsc) runtime for userspace syscall interception.
 # v5.0+: /proc, /sys, /dev whitelisting. Filtered DMI/boot_id/host leaks.
-# v5.0+: Boot-ID mount (per-persona stable fake UUID, NOT host's real).
-# v5.0+: Per-persona MAC randomization.
+# v5.0+: Boot-ID mount (a fake UUID, NOT the host's real one).
+#        ACCURACY: this is ONE host file, written once at provisioning
+#        by config/hardened_host_os.sh and then made immutable. It is
+#        not per-persona and is never rewritten on rotation: every
+#        container bind-mounts the same value read-only. See C15.
+# NOT IMPLEMENTED: per-persona MAC randomization. The orchestrator had
+#        a hardcoded static MAC and no code ever changed it. See C14.
 # v5.0+: uTLS HelloChrome_120 TLS fingerprint alignment.
 # v5.0+: First-navigation-delay 8-25s; about:blank in history.
 # v5.0+: All CloakBrowser API lockouts (Bluetooth, USB, PaymentRequest,
@@ -260,12 +269,19 @@ services:
   # -------------------------------------------------------------------
   # GOST PROXY SIDECAR: Egress SOCKS5 Gateway
   # v5.0+: SOCKS5_PERSONA_PORTS env var maps persona_uuid -> port.
-  # Each persona gets a unique GOST listener port (1081-1085).
-  # GOST command is set to listen on multiple ports, each pinning a
-  # different upstream exit. The orchestrator selects port by persona
-  # UUID hash. This prevents cross-persona source IP correlation
-  # (forensic subpoena of GOST logs yields different source IPs per
-  # persona).
+  # Each persona gets a unique GOST *listener* port (1081-1085), and the
+  # orchestrator selects it by persona UUID hash.
+  #
+  # ACCURACY (C11): those five listeners all share the SINGLE upstream
+  # set by -F below, so they do NOT give distinct exit IPs. In gost, -L
+  # is a listener and -F is the global upstream chain applied to every
+  # listener. A unique port therefore buys no egress diversity: all
+  # personas exit via the same UPSTREAM_RES_PROXY address, and a
+  # subpoena of GOST logs yields the SAME source IP for every persona.
+  #
+  # Distinct exits would need one gost instance (or chain config) per
+  # upstream. That is a procurement/architecture decision, not a config
+  # tweak, and is deliberately not done here.
   # -------------------------------------------------------------------
   proxy-sidecar-res:
     image: ginuerzh/gost:2.11.5
@@ -273,11 +289,11 @@ services:
     environment:
       TZ: UTC
     command:
-      # v5.0+: Multi-port SOCKS5 listeners. Each port = distinct upstream
-      # exit. The orchestrator's env var SOCKS5_PERSONA_PORTS specifies
-      # which port maps to which persona UUID. Below uses 5 ports as a
-      # template, but with MAX_CONCURRENT_PERSONAS=1 we only need 1 active.
-      # Gost's -L is repeatable; we use comma-separated.
+      # Multi-port SOCKS5 listeners. ACCURACY (C11): these are five
+      # listeners into ONE upstream (-F below), not five distinct
+      # exits. The orchestrator's SOCKS5_PERSONA_PORTS specifies which
+      # port maps to which persona UUID. Below uses 5 ports as a
+      # template, but with MAX_CONCURRENT_PERSONAS=1 only one is used.
       - "-L=socks5://172.18.0.5:1081?notls=true -L=socks5://172.18.0.5:1082?notls=true -L=socks5://172.18.0.5:1083?notls=true -L=socks5://172.18.0.5:1084?notls=true -L=socks5://172.18.0.5:1085?notls=true"
       - "-F=${UPSTREAM_RES_PROXY:?ERROR: UPSTREAM_RES_PROXY environment variable is not defined. Traffic leak prevention active.}"
     networks:
@@ -349,9 +365,13 @@ services:
     # v5.0+: Mock /proc and /sys files. Per-persona stable values.
     # /etc/mock_cpuinfo and /etc/mock_version are STATIC (no per-persona
     # data), so they can be shared across the single persona.
-    # /etc/mock_boot_id is BIND-MOUNTED from a file that the orchestrator
-    # rewrites on each persona rotation (6h). The orchestrator generates
-    # a fresh UUID for the new persona.
+    # /etc/mock_boot_id is BIND-MOUNTED read-only from a HOST file that
+    # config/hardened_host_os.sh writes ONCE at provisioning (from
+    # $PERSONA_UUID) and then makes immutable (chattr +i).
+    # ACCURACY (C15): no Python or shell code ever rewrites it, and the
+    # read-only bind mount plus the immutable flag mean the container
+    # could not rewrite it even if it tried. It is a constant shared by
+    # every container, not a per-persona value that rotates.
     volumes:
       - /etc/mock_cpuinfo:/proc/cpuinfo:ro
       - /etc/mock_version:/proc/version:ro
@@ -361,11 +381,19 @@ services:
       # Chromium writable paths (tmpfs-backed)
       - tmp_orch_xdg:/root/.config:rw
       - tmp_orch_cache:/root/.cache:rw
-    # v5.0+: Random MAC at container start. Compose's mac_address is
-    # static, but for 1 persona the orchestrator's entrypoint.sh can
-    # override this with `ip link set ... address` at boot. We use a
-    # realistic Intel OUI as the static base for predictability.
-    mac_address: "3c:6a:9d:1f:2e:8b"
+    # C14 fix: the previous comment claimed entrypoint.sh overrides this
+    # MAC at boot with `ip link set ... address`. It does not - the only
+    # `ip link` call in entrypoint.sh sets the MTU. The MAC was a
+    # hardcoded constant shared by every container.
+    #
+    # A static mac_address also makes `docker compose up --scale` fail
+    # with "address already in use" (C12), so it has been removed and
+    # Docker now assigns a fresh random MAC per container/replica.
+    # That is default Docker behaviour and needs no code to keep it true.
+    #
+    # If you need a fixed OUI for policy reasons, re-add it here - but
+    # be aware that doing so pins every replica to the same MAC, blocks
+    # --scale, and gives every replica an identical layer-2 identity.
     # v5.0+: Run as root (entrypoint.sh needs it for iptables).
     # entrypoint.sh drops to UID 1000 before exec'ing Python.
     user: "0:0"
@@ -446,8 +474,13 @@ services:
       doh-proxy:
         condition: service_healthy
     networks:
-      internal-net:
-        ipv4_address: 172.18.0.10
+      # C12 fix: 172.18.0.10 was hardcoded here. Nothing referenced it
+      # (verified: no code, script or config outside this file mentions
+      # that address), but a static ipv4_address makes
+      # `docker compose up --scale orchestrator=N` fail with
+      # "Address already in use" for every replica after the first.
+      # Let Docker assign it so replicas can start.
+      - internal-net
     dns_search:
       - .
     extra_hosts:
@@ -480,8 +513,19 @@ services:
     mem_limit: 900m
     mem_reservation: 600m
     mem_swappiness: 0
-    # v6.0+: Tighter PID limit for 1 GB RAM.
-    pids_limit: 64
+    # C13 fix: this was 64, which is BELOW the application's own
+    # PERSONA_PID_BUDGET of 128 (hardened_orchestrator.py).
+    # check_pid_budget() guards 128 while the cgroup killed the
+    # container at 64, so the application check could never fire before
+    # the cgroup did - and a single Chrome (~80 PIDs) was enough to trip
+    # the ceiling.
+    #
+    # Keep this >= PERSONA_PID_BUDGET plus orchestrator overhead (tini,
+    # entrypoint shell, Xvfb, PulseAudio, python). 256 leaves headroom
+    # for one persona. Raising it does NOT raise the concurrency
+    # ceiling; it stops the container killing a single browser.
+    # NOTE: on a 1 GB host more PIDs means more memory - watch mem_limit.
+    pids_limit: ${ORCHESTRATOR_PIDS_LIMIT:-256}
     # v5.0+: read-only rootfs
     read_only: true
     security_opt:
@@ -540,8 +584,12 @@ services:
     apparmor: "unconfined"
     # v5.0+: restart:no. If the container crashes, the orchestrator's
     # parent (host-level supervisor) must spin up a NEW container with
-    # a fresh boot_id and tmpfs. Same container restart = same
-    # boot_id = correlation.
+    # a fresh tmpfs.
+    # ACCURACY (C15): it does NOT get a fresh boot_id. That value is a
+    # host file written once at provisioning and made immutable, so
+    # every container - newly created or restarted - sees the identical
+    # value. "Same container restart = same boot_id" is true of every
+    # container, not just restarts.
     restart: "no"
     # v5.0+: gVisor runtime. The host daemon must have runsc installed.
     # To use gVisor, change to `runtime: runsc` and ensure

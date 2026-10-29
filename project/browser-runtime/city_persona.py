@@ -126,12 +126,15 @@ def _compute_socks5_url(persona_id: str) -> str:
     """Compute a deterministic SOCKS5 URL based on the persona_id.
 
     Uses the same hash->port mapping as the orchestrator's
-    `get_socks5_port_for_persona()`. Each persona gets a unique SOCKS5
-    listener port, preventing cross-persona source IP correlation.
+    `get_socks5_port_for_persona()`.
 
-    Without this, a returning Dallas persona and a new Houston persona
-    would share the same SOCKS5 source IP (the default 172.18.0.5:1081),
-    which is a fingerprint (two distinct "users" with the same source IP).
+    C11 ACCURACY: this gives each persona a unique *listener port*, not a
+    unique source IP. Every port is a listener on the same gost instance
+    sharing one -F upstream, so all personas still egress from the same
+    address. It does NOT prevent cross-persona source-IP correlation,
+    and the rationale below does not hold: a returning Dallas persona and
+    a new Houston persona differ only in which local door they knock on,
+    not in the IP the far side sees. See CONCURRENCY_AUDIT.md C11.
     """
     h = int(hashlib.sha256(persona_id.encode("utf-8")).hexdigest()[:8], 16)
     port = _SOCKS5_PORTS[h % len(_SOCKS5_PORTS)]
@@ -350,9 +353,13 @@ async def get_or_create_persona_for_city(
             task_payload = {}
 
         # R7-DEEP-AUDIT-2 GAP 1.11: Use a deterministic SOCKS5 URL based on
-        # the persona_id (not the default 1081 port). This ensures each
-        # persona has a unique SOCKS5 source IP, preventing cross-persona
-        # source-IP correlation.
+        # the persona_id (not the default 1081 port).
+        #
+        # C11 ACCURACY: this gives each persona a unique *listener port*,
+        # not a unique source IP. Every port is a listener on the same
+        # gost instance sharing one -F upstream, so all personas egress
+        # from the same address. It does NOT prevent cross-persona
+        # source-IP correlation. See CONCURRENCY_AUDIT.md C11.
         assigned_proxy_url = task_payload.get("proxy_url") or _compute_socks5_url(new_persona_id)
         # R7-DEEP-AUDIT-2 GAP 1.10: Use the 2-letter state code (e.g., "tx")
         # instead of the city name (e.g., "Dallas"). The proxy resolver
@@ -447,22 +454,42 @@ async def get_or_create_persona_for_city(
         logger.error(f"PPPC: Failed to create persona for city '{city_norm}': {e}")
         raise
     finally:
-        # M6 fix: Commit on success, rollback on error, always
-        # release the lock. This guarantees the FOR UPDATE row
-        # lock is never leaked (which would block all future
-        # get_or_create calls for the same city).
+        # M6 fix: Commit on success, rollback on error, then release
+        # the lock.
+        #
+        # C17 fix: the previous comment claimed this "guarantees the
+        # FOR UPDATE row lock is never leaked". It did not, and the
+        # failure mode was worse than a leak. When COMMIT/ROLLBACK
+        # raised, the exception was swallowed as "non-fatal" and
+        # `conn._m6_in_transaction` was set to False regardless - so the
+        # transaction could still be open while the flag claimed it was
+        # closed. The next call would then skip BEGIN (see the guard
+        # above), take no row lock, and silently disable the TOCTOU
+        # protection this block exists to provide.
+        #
+        # We now only clear the flag when the transaction actually
+        # ended, and we report a failed COMMIT as an error rather than
+        # a warning. `conn` is owned by the caller, so we do not close
+        # it here; asyncpg rolls back any open transaction when the
+        # connection is released to the pool.
         if _m6_lock_held:
+            _m6_tx_ended = False
             try:
                 if _m6_should_commit:
                     await conn.execute("COMMIT")
                 else:
                     await conn.execute("ROLLBACK")
+                _m6_tx_ended = True
             except Exception as tx_err:
-                logger.warning(
-                    f"PPPC: transaction end failed (non-fatal): {tx_err}"
+                logger.error(
+                    f"PPPC: transaction end FAILED ({tx_err}). The "
+                    f"connection may still hold a row lock; leaving "
+                    f"_m6_in_transaction set so the next call reopens "
+                    f"it rather than running unlocked."
                 )
             finally:
-                conn._m6_in_transaction = False
+                if _m6_tx_ended:
+                    conn._m6_in_transaction = False
 
 
 async def get_persistent_persona_id(conn, city: str) -> Optional[str]:

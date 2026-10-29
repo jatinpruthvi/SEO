@@ -12,7 +12,11 @@
 #   v5-P8  - Per-persona PID budget tracking (PERSONA_PID_BUDGET=128).
 #   v5-P9  - Per-persona persona_retirement_count, max-tasks-per-persona.
 #   v5-P10 - First-navigation-delay 8-25s; about:blank in history; history.length >= 2.
-#   v5-P11 - Per-persona boot_id rotation via /etc/mock_boot_id rewrite.
+#   v5-P11 - [NOT IMPLEMENTED] was "Per-persona boot_id rotation via
+#            /etc/mock_boot_id rewrite". No code writes that file: it is
+#            a host file created once at provisioning and made immutable,
+#            then bind-mounted read-only. Every container sees the same
+#            value. See C15 in CONCURRENCY_AUDIT.md.
 #   v5-P12 - Battery API: charging=true, level=0.85-0.99 (locked per persona).
 #   v5-P13 - Intl.DateTimeFormat timezone matches proxy geo.
 #   v5-P14 - Date.now() drift check (chrony in entrypoint, verified in orchestrator).
@@ -22,8 +26,17 @@
 #   v5-P18 - Locked per-persona audioContext sampleRate (48000, not random).
 #   v5-P19 - Cookie lifetime randomization 7-30 days.
 #   v5-P20 - ulimit core 0 verified, dmesg access denied verified.
-#   v5-P21 - restart:no; new container = new boot_id, new MAC, new tmpfs.
-#   v5-P22 - Daemon loop: asyncio.gather(return_exceptions=True), race-free.
+#   v5-P21 - restart:no; new container = new tmpfs (true). Since C12/C14
+#            removed the static IP and static MAC, "new MAC" is now also
+#            true. NOT true for boot_id: that is a shared immutable host
+#            file, so it does NOT change per container. See C15.
+#   v5-P22 - [CLAIM WITHDRAWN] was "Daemon loop: asyncio.gather(
+#            return_exceptions=True), race-free." The gather it points at
+#            is in SHUTDOWN cleanup, not the daemon loop, and
+#            return_exceptions=True suppresses errors rather than
+#            preventing races. The daemon loop had ten real concurrency
+#            defects (C1-C10), now fixed. Using gather does not make
+#            anything race-free.
 #   v5-P23 - Cookie persistence via in-memory only (no disk).
 #   v5-P24 - per-persona uTLS HelloChrome_120 TLS fingerprint alignment hint.
 #   v5-P25 - CloakBrowser paths discovered: host-deployed at /opt/cloakbrowser/chrome.
@@ -630,8 +643,15 @@ SINKHOLE_URL = os.getenv("SINKHOLE_URL", "http://127.0.0.1:1")
 
 # v5.0+: per-persona SOCKS5 port assignment
 def get_socks5_port_for_persona(persona_id: str) -> int:
-    """Map persona UUID to a unique SOCKS5 listener port.
-    This prevents cross-persona source IP correlation.
+    """Map persona UUID to a unique SOCKS5 *listener* port.
+
+    C11 ACCURACY: a unique listener port is NOT a unique source IP.
+    All five ports in SOCKS5_PERSONA_PORTS are listeners on the same
+    gost instance, and gost's single -F upstream applies to every one
+    of them, so all personas egress from the same address. This
+    function spreads personas across listeners; it provides no egress
+    diversity and must not be relied on to prevent cross-persona
+    source-IP correlation. See CONCURRENCY_AUDIT.md C11.
 
     R7-HOR-008: Use SHA-256 instead of MD5. On FIPS-mode Debian
     images, hashlib.md5 may be disabled. SHA-256 is always available.
@@ -648,9 +668,11 @@ def get_socks5_url_for_persona(persona_id: str) -> str:
     """DC-19 (Pass 19): Build the SOCKS5 URL for a specific persona.
 
     Combines `SOCKS5_PROXY_BASE` (proxy-res container IP) with the
-    persona-specific port (from `get_socks5_port_for_persona`). Each
-    persona uses a unique SOCKS5 listener port, preventing cross-persona
-    source IP correlation.
+    persona-specific port (from `get_socks5_port_for_persona`).
+
+    C11 ACCURACY: the port is unique per persona but the upstream is
+    shared (see get_socks5_port_for_persona), so this does NOT prevent
+    cross-persona source-IP correlation.
     """
     port = get_socks5_port_for_persona(persona_id)
     return f"{SOCKS5_PROXY_BASE}:{port}"
@@ -3341,8 +3363,10 @@ async def run_persona_pipeline(persona_id: str, task_name: str, task_payload: di
             # v6.2: Strict CloakBrowser-only launcher. NO FALLBACK to bare Chromium.
             # If CloakBrowser fails to launch, the task is ABORTED. The
             # container will be recreated with restart:no policy, which
-            # means a NEW container with a NEW boot_id, NEW tmpfs, and
-            # NEW persona state. Falling back to bare Playwright Chromium
+            # means a NEW container with a NEW tmpfs and NEW persona
+            # state. (Not a new boot_id: that is a shared immutable host
+            # file, identical in every container - see C15.)
+            # Falling back to bare Playwright Chromium
             # would expose the unhardened browser to the target, which is
             # an instant detection by reCAPTCHA Enterprise, Cloudflare
             # Turnstile, Akamai, and PerimeterX.
