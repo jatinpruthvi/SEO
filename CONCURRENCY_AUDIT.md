@@ -641,3 +641,127 @@ container is permanently one task at a time.
 
 The *correctness* ceiling went 1 -> N. The *container-start* ceiling went 1 -> N.
 The *resource* ceiling is still about 1, and the *isolation* ceiling is still 1.
+
+
+---
+
+## Part 3 - Single-session reliability, and multi-container on one host
+
+The deployment target is one active session. This section covers the three
+defects that remained in that configuration, and answers a follow-up question
+about running several containers on one host.
+
+### C18 - HIGH - identity files are frozen forever and cannot be regenerated
+
+`apply_immutable()` runs `chattr +i` on the mock identity files
+(`hardened_host_os.sh:163`, called at `:983` cpuinfo, `:1004` version, the DMI
+tree, boot_id and osrelease). **Nothing ever removed that flag** - `chattr -i`
+did not appear anywhere in the script.
+
+Consequences:
+
+1. **Re-running the provisioning script silently fails.** The re-run path does
+   `rm -f /etc/mock_boot_id` then `mv -f`, both of which fail on an immutable
+   file, so the old value survives and `mark_fail()` reports an error.
+2. **Cloning a provisioned host clones its identity.** "Spin up a fresh host"
+   from a snapshot or image gives every copy the same boot_id, CPU model,
+   kernel string, DMI and osrelease. A second session would present the first
+   session's hardware fingerprint.
+
+**Fix:** added `remove_immutable()` and `remove_immutable_tree()` (the inverse
+of `apply_immutable`), called before each removal at all five sites. The DMI
+tree needs the tree variant because each file inside is frozen individually, so
+`rm -rf` on the directory fails until every child is unfrozen.
+
+### C19 - HIGH - a dead container stays dead, silently
+
+    restart: "no"
+
+The comment justified this with "the orchestrator's parent (host-level
+supervisor) must spin up a NEW container". **No such supervisor exists** - there
+is no systemd unit, timer, path unit or crontab anywhere in the repo, and the
+orchestrator had no healthcheck. A crash, an OOM kill, or the panic handler's
+`exit(99)` left the container dead and the task queue stalled with nothing to
+detect or recover it.
+
+The stated reason was also false: it claimed a new container gets a fresh
+boot_id while a restart would not. boot_id is a host-level constant (C15) that
+never changes for any container, so restarting in place carries no identity
+cost.
+
+**Fix:** `restart: unless-stopped` (rather than `always`, so an operator-driven
+`docker compose down` is respected) plus a healthcheck:
+
+```yaml
+healthcheck:
+  test: ["CMD-SHELL", "pgrep -f hardened_orchestrator.py >/dev/null 2>&1 || exit 1"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 180s
+```
+
+The `start_period` is generous because cold start performs schema init, Xvfb
+startup and browser checks.
+
+### C20 - MEDIUM - the memory budget does not fit inside the limit
+
+    mem_limit: 900m
+      Chrome + CloakBrowser   ~700 MB
+      orchestrator Python     ~200 MB
+      per-task profile tmpfs   180 MB   (TASK_TMPFS_SIZE_MB=180)
+      /dev/shm               up to 512 MB
+      /tmp 512M + /mnt/ramdisk 200M + /var/tmp 64M + /run 16M
+
+tmpfs and shm are charged to the same cgroup, but only written pages count, so
+steady state is below the sum. Even so there is no headroom: Chrome plus the
+task profile alone is ~1.08 GB against a 900m ceiling, and `mem_swappiness: 0`
+removes swap as a buffer.
+
+**Fix:** left at 900m (the host is 1 GB; raising it would push the host into
+OOM) but made overridable via `ORCHESTRATOR_MEM_LIMIT` /
+`ORCHESTRATOR_MEM_RESERVATION`, with the arithmetic written into the comment.
+Combined with C19, an OOM kill now recovers instead of stalling permanently.
+Not resolved, only made visible and tunable - measuring real peak usage needs a
+live run.
+
+---
+
+### Multiple containers on one host
+
+**Q: same host, several containers, each with a different IP - any issue?**
+
+Yes. The critical point is that **a different container IP is not a different
+egress IP**.
+
+| Container IP | Egress IP (what the far side sees) |
+|---|---|
+| 172.18.0.x, unique per container | `UPSTREAM_RES_PROXY` - the same address for all of them |
+
+Every container sits on `internal-net` only, which is `internal: true` with
+`enable_ip_masquerade: false`. Traffic must exit via `proxy-res`, and gost
+forwards all five listeners through the single `-F` upstream (C11). Giving each
+container its own address changes nothing that leaves the host.
+
+The full list of what multiple containers on one host share or collide on:
+
+| Issue | Detail |
+|---|---|
+| One egress IP | all containers exit via `UPSTREAM_RES_PROXY` (C11) |
+| Identical hardware identity | all bind-mount the same host `/etc/mock_*` files (C15, C18) |
+| `container_name` blocks `--scale` | `hardened-orchestrator` is pinned (`docker-compose.yml:339`) |
+| Shared writable volumes | `tmp_orch_xdg:/root/.config:rw` and `tmp_orch_cache:/root/.cache:rw` are *named* volumes, so every replica mounts the same `/root/.config` and `/root/.cache` |
+| CPU contention | `cpuset: "${ORCHESTRATOR_CPUSET:-0}"` pins every replica to core 0 |
+| Memory | `mem_limit: 900m` each against a 1 GB host |
+
+**Q: same Docker host, multiple containers - any issue?**
+
+Same list. There is no difference between these two questions at the resource
+layer; the only distinction is that "different IP" in the first question refers
+to the internal container address, which does not affect egress.
+
+**Bottom line:** several containers on one host gives you N sessions that all
+look like the same machine on the same IP, sharing writable state. Isolation
+requires different *hosts* with separately provisioned identity (C18 now makes
+re-provisioning possible) and different upstream credentials - the latter being
+the procurement decision flagged in C11 and left to the operator.

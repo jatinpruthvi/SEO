@@ -508,10 +508,27 @@ services:
         soft: 0
         hard: 0
     # v6.0+: 1-persona memory sizing for x86 E2.1.Micro (1 GB total).
-    # We allocate most of the available memory to the orchestrator.
-    # CloakBrowser + Chrome use ~700 MB; orchestrator Python ~200 MB.
-    mem_limit: 900m
-    mem_reservation: 600m
+    #
+    # C20: the configured footprint does not fit inside this limit.
+    #   CloakBrowser + Chrome      ~700 MB
+    #   orchestrator Python        ~200 MB
+    #   per-task profile tmpfs      180 MB  (TASK_TMPFS_SIZE_MB=180, :454)
+    #   /dev/shm                   up to 512 MB (shm_size above)
+    #   /tmp 512M + /mnt/ramdisk 200M + /var/tmp 64M + /run 16M
+    #
+    # tmpfs and shm are charged to this same cgroup, but only what is
+    # actually written counts - so steady state is well below the sum.
+    # Even so there is no headroom: Chrome plus the task profile alone is
+    # ~1.08 GB against a 900m ceiling, and mem_swappiness is 0 so there
+    # is no swap to absorb a spike.
+    #
+    # Deliberately left at 900m: the host is 1 GB and raising this would
+    # push the host itself into OOM. Override with ORCHESTRATOR_MEM_LIMIT
+    # once you have measured real usage on your hardware. Note that with
+    # C19 (restart: unless-stopped) an OOM kill now recovers instead of
+    # silently stalling the queue.
+    mem_limit: ${ORCHESTRATOR_MEM_LIMIT:-900m}
+    mem_reservation: ${ORCHESTRATOR_MEM_RESERVATION:-600m}
     mem_swappiness: 0
     # C13 fix: this was 64, which is BELOW the application's own
     # PERSONA_PID_BUDGET of 128 (hardened_orchestrator.py).
@@ -582,15 +599,34 @@ services:
       net.ipv4.conf.all.accept_source_route: 0
       net.ipv4.conf.default.accept_source_route: 0
     apparmor: "unconfined"
-    # v5.0+: restart:no. If the container crashes, the orchestrator's
-    # parent (host-level supervisor) must spin up a NEW container with
-    # a fresh tmpfs.
-    # ACCURACY (C15): it does NOT get a fresh boot_id. That value is a
-    # host file written once at provisioning and made immutable, so
-    # every container - newly created or restarted - sees the identical
-    # value. "Same container restart = same boot_id" is true of every
-    # container, not just restarts.
-    restart: "no"
+    # C19 fix: this was restart: "no", justified by "the orchestrator's
+    # parent (host-level supervisor) must spin up a NEW container".
+    # There is no such supervisor - no systemd unit, timer, cron or
+    # watchdog exists anywhere in this repo - so a crash, an OOM kill or
+    # the panic handler's exit(99) left the container dead and the task
+    # queue stalled silently.
+    #
+    # The stated reason for restart:no was also false. It claimed a new
+    # container gets a fresh boot_id while a restart would not. boot_id
+    # is a host file (C15) that never changes for ANY container, new or
+    # restarted, so restarting in place costs nothing in identity terms.
+    #
+    # Recovering automatically beats staying dead. `unless-stopped` rather
+    # than `always` so an operator-driven `docker compose down` is
+    # respected.
+    restart: unless-stopped
+    # C19: without a healthcheck an OOM-killed or wedged daemon is
+    # invisible - there was previously no way to tell a working
+    # orchestrator from a dead one. The daemon polls the queue every
+    # DAEMON_POLL_INTERVAL (5s), so a liveness check on the process is
+    # enough to catch it.
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f hardened_orchestrator.py >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # Generous: cold start does schema init, Xvfb and browser checks.
+      start_period: 180s
     # v5.0+: gVisor runtime. The host daemon must have runsc installed.
     # To use gVisor, change to `runtime: runsc` and ensure
     # /etc/docker/daemon.json has `"runtimes": {"runsc": {"path": "/usr/bin/runsc"}}`.

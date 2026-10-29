@@ -164,6 +164,38 @@ apply_immutable() {
     fi
 }
 
+# C18 fix: apply_immutable() freezes these files with `chattr +i`, but
+# nothing ever removed that flag. A second run of this script therefore
+# failed in a silent and confusing way: `rm -f` and `mv -f` both fail on
+# an immutable file, so the old value survived, the new value was never
+# installed, and mark_fail() reported a provisioning error.
+#
+# That mattered more than it looks. Anyone cloning or reimaging a
+# provisioned host inherits the SAME frozen boot_id, cpuinfo, version,
+# osrelease and DMI on every copy - so "spin up a fresh host" did not
+# produce a fresh identity.
+#
+# remove_immutable() is the inverse of apply_immutable(). Call it before
+# removing or replacing any path that an earlier run may have frozen.
+remove_immutable() {
+    if command -v chattr >/dev/null 2>&1; then
+        chattr -i "$1" 2>/dev/null || true
+    fi
+}
+
+# C18 fix: same, for a directory whose *contents* were frozen. The DMI
+# mock is a directory and each file inside it is individually immutable,
+# so `rm -rf` on the directory fails until every child is unfrozen.
+remove_immutable_tree() {
+    [ -e "$1" ] || return 0
+    if [ -d "$1" ]; then
+        for _rmi_f in "$1"/*; do
+            [ -e "$_rmi_f" ] && remove_immutable "$_rmi_f"
+        done
+    fi
+    remove_immutable "$1"
+}
+
 APT_FAILED=0
 
 echo "=========================================================================="
@@ -831,6 +863,10 @@ current_section="10c. Mock CPU Info (persona-consistent)"
 # This is the persona's claimed CPU, NOT the host's actual CPU.
 # Format: Intel i7-8559U (4 cores, 8 threads) — matches the persona's
 # hardwareConcurrency=4 in prototype_hardener.js.
+# C18: unfreeze before removing. On a re-run this file carries chattr +i
+# from apply_immutable() and `rm` would fail silently, leaving the old
+# CPU model in place.
+remove_immutable /etc/mock_cpuinfo
 if [ -d /etc/mock_cpuinfo ]; then
     rm -rf /etc/mock_cpuinfo || { mark_fail "Cannot remove existing /etc/mock_cpuinfo"; }
 elif [ -L /etc/mock_cpuinfo ]; then
@@ -964,6 +1000,8 @@ current_section="10d. Mock Kernel Version (persona-consistent)"
 # The persona claims Windows. The container will see this as its
 # /proc/version when the orchestrator's entrypoint.sh bind-mounts
 # /etc/mock_version over it.
+# C18: unfreeze before removing.
+remove_immutable /etc/mock_version
 if [ -d /etc/mock_version ] || [ -L /etc/mock_version ]; then
     rm -rf /etc/mock_version
 fi
@@ -992,6 +1030,9 @@ fi
 current_section="10d2. Mock DMI ID (persona-consistent)"
 # Real Windows desktop DMI strings. The persona claims to be a
 # Dell XPS 13 9370 (a real consumer Windows laptop).
+# C18: every file inside is frozen individually by apply_immutable(), so
+# `rm -rf` on the directory fails until the whole tree is unfrozen.
+remove_immutable_tree /etc/mock_dmi_id
 if [ -d /etc/mock_dmi_id ]; then
     rm -rf /etc/mock_dmi_id
 fi
@@ -1071,6 +1112,9 @@ current_section="10d3. Mock boot_id"
 # container bind-mounts that same file read-only. It is therefore a
 # host-wide constant, NOT a per-persona or per-session value, and it
 # never changes. The container cannot rewrite it (ro mount + chattr +i).
+# C18: unfreeze before removing. This is the one that silently kept the
+# OLD value on every re-run, which is why cloned hosts all shared a boot_id.
+remove_immutable /etc/mock_boot_id
 if [ -f /etc/mock_boot_id ]; then
     rm -f /etc/mock_boot_id
 fi
@@ -1088,9 +1132,13 @@ else
 fi
 
 #-------------------------------------------------------------------------
-# 10d4. Mock osrelease (per-persona — container reads as /proc/sys/kernel/osrelease)
+# 10d4. Mock osrelease (host-level constant — container reads it as
+# /proc/sys/kernel/osrelease). ACCURACY (C15): not per-persona; written
+# once here, frozen, and shared read-only by every container on this host.
 #-------------------------------------------------------------------------
 current_section="10d4. Mock osrelease (persona-consistent)"
+# C18: unfreeze before removing.
+remove_immutable /etc/mock_osrelease
 if [ -f /etc/mock_osrelease ]; then
     rm -f /etc/mock_osrelease
 fi
