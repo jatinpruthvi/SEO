@@ -548,3 +548,96 @@ randomization in `hardened_host_os.sh`.
 **Not exhaustively verified:** 241 candidate comments were triaged and the 19 above
 were checked line-by-line against the code. The remainder read as accurate, but
 only a full manual read would rule out further drift.
+
+
+---
+
+## The concurrency ceiling, layer by layer
+
+"The ceiling is still 1" is a compressed statement. It is really five independent
+limits stacked on top of each other, and the fixes moved three of them.
+
+**Concurrent personas = (containers that can run) x (tasks per container).**
+
+The second term is always 1: `TASKS_PER_BATCH = 1` and the daemon loop consumes
+the batch sequentially (`hardened_orchestrator.py:389`, `:4867`). So the ceiling is
+really *how many orchestrator containers can run at once*, capped by:
+
+| # | Layer | Capped by | Before | After | Binding now? |
+|---|-------|-----------|--------|-------|--------------|
+| 1 | Container start | static `ipv4_address` + static `mac_address` | 1 | N | no |
+| 2 | PID budget | `pids_limit: 64` | broken even at 1 | N | no |
+| 3 | Data integrity | the C1-C10 races | 1 | N | no |
+| 4 | Host resources | 1 core, `cpus: 0.5`, `mem_limit: 900m` | ~1 | ~1 | **yes** |
+| 5 | Egress / identity | one `UPSTREAM_RES_PROXY`; shared host identity files | 1 | 1 | **yes**, once 4 is lifted |
+
+### Layers that were raised
+
+**Layer 1, container start (1 -> N).** `ipv4_address: 172.18.0.10` and
+`mac_address: 3c:6a:9d:1f:2e:8b` were hardcoded on the orchestrator, so replica #2
+failed to start with "Address already in use". Both removed (C12). `172.18.0.10`
+was verified unreferenced by any code, script or config outside
+`docker-compose.yml`, so dropping it is safe. `docker compose up --scale
+orchestrator=N` now boots N containers.
+
+**Layer 2, PID budget (broken at 1 -> N).** `pids_limit: 64` sat below the
+application's own `PERSONA_PID_BUDGET = 128` and below a single Chrome's ~80 PIDs,
+so the cgroup killed the container before `check_pid_budget()` could ever fire.
+Now `${ORCHESTRATOR_PIDS_LIMIT:-256}` (C13). Two browsers is roughly 160 PIDs plus
+orchestrator overhead, so PIDs are no longer the binding constraint.
+
+**Layer 3, data integrity (1 -> N).** Before the C1-C10 fixes, two workers
+executed the same task, lost failure-count updates and destroyed each other's
+sessions. The claim / lease / reaper machinery makes N workers safe against each
+other. The database layer is now correct for any N.
+
+**Net effect:** the ceiling moved from *"1 because the system breaks above 1"* to
+*"1 because the host can only feed one browser"*. The first was a defect; the
+second is physics.
+
+### Layers that still bind
+
+**Layer 4, host resources - this is the binding constraint today.**
+
+    cpuset: "${ORCHESTRATOR_CPUSET:-0}"   # pinned to ONE core
+    cpus: '0.5'
+    mem_limit: 900m / mem_reservation: 600m
+
+The compose comment at `:510` states the host is *"x86 E2.1.Micro (1 GB total)"*
+and that Chrome uses ~700 MB with orchestrator Python ~200 MB. One orchestrator
+already consumes about 900 MB of a 1 GB host; a second wants another 900 MB. And
+`cpuset: 0` means two containers would timeslice the single core that one browser
+already saturates.
+
+Raising this needs a bigger host, a `cpuset` range and a higher `mem_limit`. None
+of that was changed, because sizing is a deployment decision that depends on
+hardware we cannot see from here.
+
+**Layer 5, egress and identity - binds the moment Layer 4 is lifted.** Every
+container routes through `proxy-res` into the single `UPSTREAM_RES_PROXY` (C11),
+and every container reads identical `mock_cpuinfo`, `mock_version`, `mock_dmi_id`,
+`mock_boot_id` and `mock_osrelease` from read-only host mounts (C15). On unlimited
+hardware you would get N personas that present as the same machine on the same IP.
+Deliberately left unchanged.
+
+### Two knobs that do not do what they look like
+
+**`MAX_CONCURRENT_PERSONAS` is not a gate.** It is a hardcoded literal
+(`hardened_orchestrator.py:367`), used in exactly one functional place - sizing the
+pacing-engine cache at `:735` (`_max_engines = MAX_CONCURRENT_PERSONAS * 4 + 4`).
+Nothing enforces it as a concurrency limit. The `MAX_CONCURRENT_PERSONAS=1` value
+compose passes as an environment variable at `:429` is never read by the code. The
+audit tests only assert that the literal string `"MAX_CONCURRENT_PERSONAS = 1"`
+exists in the source (`R7_DEEP_AUDIT_2/test_pass17_audit.py:380`).
+
+**`TASKS_PER_BATCH` is also hardcoded** (`:389`), not read from the environment, so
+it cannot be raised by configuration either.
+
+**Consequence:** raising `MAX_CONCURRENT_PERSONAS` alone changes nothing. Real
+concurrency in this system only ever comes from running more containers, and one
+container is permanently one task at a time.
+
+### Summary
+
+The *correctness* ceiling went 1 -> N. The *container-start* ceiling went 1 -> N.
+The *resource* ceiling is still about 1, and the *isolation* ceiling is still 1.
