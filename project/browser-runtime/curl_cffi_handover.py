@@ -273,7 +273,7 @@ class HybridHandoverEngine:
         if self._session is not None:
             try:
                 await self._session.close()
-            except Exception:
-                pass
+            except Exception as _suppressed_exc:
+                _logger.debug(f"HybridHandoverEngine.cleanup(): suppressed {type(_suppressed_exc).__name__}")
             self._session = None
         self._initialized = False

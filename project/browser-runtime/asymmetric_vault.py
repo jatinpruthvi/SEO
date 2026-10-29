@@ -143,9 +143,9 @@ class AsymmetricSessionVault:
                     "calling close(). Sensitive state (private key, TOFU cache) "
                     "may persist in memory. Call vault.close() before discarding."
                 )
-        except Exception:
+        except Exception as _suppressed_exc:
             # Never raise from __del__
-            pass
+            logger.debug(f"AsymmetricSessionVault.__del__(): suppressed {type(_suppressed_exc).__name__}")
 
     def serialize_private_key(self) -> bytes:
         """Serializes private key to PEM format for persistent storage."""

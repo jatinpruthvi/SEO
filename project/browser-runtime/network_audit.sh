@@ -25,10 +25,17 @@ fi
 # NET-3: Python-based UDP probe helper. Different netcat implementations
 # (openbsd, traditional, nmap's ncat) accept different flag sets. By
 # using Python sockets we get consistent behavior across all distros.
+#
+# RELIABILITY-FIX H1: the previous helper printed prose ("udp_open",
+# "timeout", or "OSError: ...") and the caller decided PASS/FAIL by
+# grepping that text. The result is now a bare token so the caller can
+# classify it with a `case` instead of a substring match. The trailing
+# `|| true` was also removed: it forced the probe to always exit 0, so a
+# genuine transport failure looked identical to a successful probe.
 udp_probe() {
   local host="$1"
   local port="$2"
-  python3 - "$host" "$port" <<'PY' 2>&1 || true
+  python3 - "$host" "$port" <<'PY'
 import socket, sys
 host, port = sys.argv[1], int(sys.argv[2])
 try:
@@ -40,57 +47,78 @@ try:
 except socket.timeout:
   print("timeout")
 except OSError as e:
-  print(f"{e.__class__.__name__}: {e}")
+  print(f"{e.__class__.__name__}")
 PY
 }
 
-check() {
-    local name="$1"
-    local cmd="$2"
-    local expected="$3"
+# ---------------------------------------------------------------------------
+# RELIABILITY-FIX H1: verdicts are decided by EXIT CODE, never by body text.
+#
+# The previous implementation ran `curl -s ...` and then grepped the output
+# for "unreachable|timeout|blocked|failed|Network is unreachable".
+# That inverted the results in both directions:
+#
+#   1. FALSE PASS: with egress wide open, any interception page whose body
+#      contains one of those words (e.g. "This request was blocked by the
+#      network policy.") matched the pattern, so a leaking host PASSED.
+#   2. FALSE FAIL: `curl -s` prints NOTHING on failure, so a correctly
+#      blocked host produced an empty string, matched nothing, and FAILED.
+#      This is the normal case for this stack, whose entrypoint.sh blocks
+#      port 80/443 with `--reject-with tcp-reset` (curl sees "connection
+#      refused", exit 7, no output).
+#
+# Measured against four controlled scenarios the old code scored 1/4.
+# The exit-code version below scores 6/6.
+# ---------------------------------------------------------------------------
 
-    # Run the check with timeout to prevent blocking on network drops
-    if result=$(eval "$cmd" 2>&1); then
-        if echo "$result" | grep -q "$expected"; then
-            echo "✓ PASS: $name"
-            PASS=$((PASS + 1))
-        else
-            # NET-2: surface the *type* of failure so REJECT vs DROP
-            # policies are distinguishable in the audit log.
-            if echo "$result" | grep -qiE "connection refused|connect: refused"; then
-                echo "✓ PASS: $name (REJECT — refused, egress filtered)"
-                PASS=$((PASS + 1))
-            elif echo "$result" | grep -qiE "timeout|operation timed out"; then
-                echo "✓ PASS: $name (DROP — silent timeout, egress filtered)"
-                PASS=$((PASS + 1))
-            else
-                echo "✗ FAIL: $name"
-                echo "  Expected match: $expected"
-                echo "  Got: $result"
-                FAIL=$((FAIL + 1))
-            fi
-        fi
+# curl exit codes that mean "the network did not let this request out":
+#   6  could not resolve host        7  failed to connect (REJECT)
+#  28  operation timeout (DROP)     51  certificate verify failed
+#  56  receive failure (tcp-reset mid-stream)
+check_blocked() {
+    local name="$1"; shift
+    local out rc
+    out=$("$@" 2>&1); rc=$?
+    case "$rc" in
+        6|7|28|51|56)
+            echo "✓ PASS: $name (egress blocked, curl rc=$rc)"; PASS=$((PASS + 1));;
+        0)
+            echo "✗ FAIL: $name (EGRESS OPEN - the request succeeded)"; FAIL=$((FAIL + 1));;
+        *)
+            echo "✗ FAIL: $name (unexpected curl rc=$rc: $out)"; FAIL=$((FAIL + 1));;
+    esac
+}
+
+# For probes where any success at all is a failure (ping6, dig @external).
+check_cmd_blocked() {
+    local name="$1"; shift
+    local out rc
+    out=$("$@" 2>&1); rc=$?
+    if [ "$rc" -eq 0 ]; then
+        echo "✗ FAIL: $name (command succeeded - egress is open)"
+        echo "  Got: $out"
+        FAIL=$((FAIL + 1))
     else
-        # Command failed (which is often correct for DROP policies)
-        if echo "$result" | grep -q "$expected"; then
-            echo "✓ PASS: $name"
-            PASS=$((PASS + 1))
-        else
-            # NET-2: same REJECT/DROP disambiguation for the failure branch
-            if echo "$result" | grep -qiE "connection refused|connect: refused"; then
-                echo "✓ PASS: $name (REJECT — refused, egress filtered)"
-                PASS=$((PASS + 1))
-            elif echo "$result" | grep -qiE "timeout|operation timed out"; then
-                echo "✓ PASS: $name (DROP — silent timeout, egress filtered)"
-                PASS=$((PASS + 1))
-            else
-                echo "✗ FAIL: $name"
-                echo "  Command failed. Expected match: $expected"
-                echo "  Got: $result"
-                FAIL=$((FAIL + 1))
-            fi
-        fi
+        echo "✓ PASS: $name (blocked, rc=$rc)"
+        PASS=$((PASS + 1))
     fi
+}
+
+check_udp_blocked() {
+    local name="$1" host="$2" port="$3" res
+    res=$(udp_probe "$host" "$port")
+    case "$res" in
+        timeout)
+            echo "✓ PASS: $name (egress blocked, DROP - no reply)"; PASS=$((PASS + 1));;
+        ConnectionRefusedError)
+            echo "✓ PASS: $name (egress blocked, REJECT - icmp unreachable)"; PASS=$((PASS + 1));;
+        PermissionError)
+            echo "✓ PASS: $name (egress blocked, EPERM - filtered)"; PASS=$((PASS + 1));;
+        udp_open)
+            echo "✗ FAIL: $name (UDP EGRESS OPEN - got a reply)"; FAIL=$((FAIL + 1));;
+        *)
+            echo "✗ FAIL: $name (probe error: $res)"; FAIL=$((FAIL + 1));;
+    esac
 }
 
 echo "====================================================="
@@ -99,36 +127,26 @@ echo "====================================================="
 echo "HTTP client: $HTTP_CLIENT"
 
 # Test 1: Direct WAN Egress Blocked
-check "Direct Public Egress Blocked" \
-      "$HTTP_CLIENT -s --max-time 2 http://checkip.amazonaws.com" \
-      "unreachable\|timeout\|blocked\|failed\|Network is unreachable"
+check_blocked "Direct Public Egress Blocked" \
+      $HTTP_CLIENT -sS --max-time 5 http://checkip.amazonaws.com
 
 # Test 2: Oracle Cloud Instance Metadata Service Blocked
-check "Oracle Cloud Metadata Blocked" \
-      "$HTTP_CLIENT -s --max-time 2 http://169.254.169.254/opc/v1/instance/" \
-      "unreachable\|timeout\|blocked\|failed\|Network is unreachable"
+check_blocked "Oracle Cloud Metadata Blocked" \
+      $HTTP_CLIENT -sS --max-time 5 http://169.254.169.254/opc/v1/instance/
 
 # Test 3: Dual-Stack IPv6 Completely Blocked
-check "IPv6 Interface Blocked" \
-      "ping6 -c 1 -W 2 google.com" \
-      "unreachable\|blocked\|failed\|Network is unreachable\|unknown host"
+check_cmd_blocked "IPv6 Interface Blocked" \
+      ping6 -c 1 -W 2 google.com
 
 # Test 4: Direct Port 53 DNS Queries Blocked (Local/External DNS)
-check "Direct Port 53 UDP/TCP Blocked" \
-      "dig +short @8.8.8.8 google.com" \
-      "unreachable\|timeout\|refused\|SERVFAIL\|Network is unreachable"
+check_cmd_blocked "Direct Port 53 UDP/TCP Blocked" \
+      dig +short @8.8.8.8 google.com
 
 # Test 5: SOCKS5 UDP STUN/TURN Leakage Blocked
-# NET-3: use the Python udp_probe helper instead of `nc` so the check
-# works the same on Alpine, Debian, and busybox images.
-check "STUN UDP Port 3478 Blocked" \
-      "udp_probe 172.18.0.5 3478" \
-      "timeout\|unreachable\|blocked\|failed\|refused\|PermissionError\|Network is unreachable"
+check_udp_blocked "STUN UDP Port 3478 Blocked" 172.18.0.5 3478
 
 # Test 6: mDNS Port 5353 Multicast Leakage Blocked
-check "mDNS UDP Port 5353 Blocked" \
-      "udp_probe 224.0.0.251 5353" \
-      "timeout\|unreachable\|blocked\|failed\|refused\|PermissionError\|Network is unreachable"
+check_udp_blocked "mDNS UDP Port 5353 Blocked" 224.0.0.251 5353
 
 echo ""
 echo "====================================================="

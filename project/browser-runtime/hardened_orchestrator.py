@@ -58,6 +58,10 @@ import importlib
 import re
 import shutil
 import hashlib
+# RELIABILITY-FIX L1b: `ctypes` was only imported inside two functions, while the
+# module-level annotation `_make_zeroable_key(...) -> "ctypes.Array"` referenced it.
+# Hoisted here so the annotation resolves and both callers share one import.
+import ctypes
 import urllib.parse
 import subprocess
 import socket
@@ -262,7 +266,12 @@ if _keyboard_emulator_module is None:
 # humanized_movement.py. 1000 entries covers ~50x the MAX_CONCURRENT_PERSONAS
 # count, giving plenty of headroom for in-flight and recently-retired personas.
 import collections as _collections
-_persona_delay_rng_registries: "collections.OrderedDict[str, Dict[str, random.Random]]" = _collections.OrderedDict()
+# RELIABILITY-FIX L1a: this annotation previously read "collections.OrderedDict[...]",
+# but the module is imported as `_collections`, so the annotation named a module that
+# does not exist in this namespace. String annotations are never evaluated at runtime
+# (PEP 526), so it did not raise -- but it broke typing.get_type_hints() and any
+# introspection over this module. Refer to the real alias.
+_persona_delay_rng_registries: "_collections.OrderedDict[str, Dict[str, random.Random]]" = _collections.OrderedDict()
 _PERSONA_DELAY_RNG_REGISTRY_MAX = 1000
 
 DB_PASSWD = os.environ["DB_PASSWD"]
@@ -309,11 +318,11 @@ def _zero_key(arr) -> None:
     if arr is None:
         return
     try:
-        import ctypes
+        # RELIABILITY-FIX L1b: `ctypes` is now imported at module level.
         ctypes.memset(ctypes.addressof(arr), 0, len(arr))
-    except Exception:
+    except Exception as _suppressed_exc:
         # Non-fatal; the buffer will be GC'd eventually
-        pass
+        logger.debug(f"_zero_key(): suppressed {type(_suppressed_exc).__name__}")
 
 # Create the zeroable key (used for Fernet operations)
 _ENCRYPTION_KEY_BUF = _make_zeroable_key(ENCRYPTION_KEY)
@@ -447,8 +456,8 @@ async def _verify_single_tmpfs_invariant_async():
         except asyncio.TimeoutError:
             try:
                 proc.kill()
-            except Exception:
-                pass
+            except Exception as _suppressed_exc:
+                logger.debug(f"_verify_single_tmpfs_invariant_async(): suppressed {type(_suppressed_exc).__name__}")
             try:
                 # M32 fix: Wait for the killed proc to be reaped
                 # BEFORE returning. The previous code did
@@ -460,8 +469,8 @@ async def _verify_single_tmpfs_invariant_async():
                 # a zombie process visible to ps. We now wrap the
                 # wait in try/except for total safety.
                 await proc.wait()
-            except Exception:
-                pass
+            except Exception as _suppressed_exc:
+                logger.debug(f"_verify_single_tmpfs_invariant_async(): suppressed {type(_suppressed_exc).__name__}")
             return True  # assume OK on timeout
         if proc.returncode != 0:
             return True  # mount command not available; skip
@@ -486,12 +495,12 @@ async def _verify_single_tmpfs_invariant_async():
         if proc is not None and proc.returncode is None:
             try:
                 proc.kill()
-            except Exception:
-                pass
+            except Exception as _suppressed_exc:
+                logger.debug(f"_verify_single_tmpfs_invariant_async(): suppressed {type(_suppressed_exc).__name__}")
             try:
                 await proc.wait()
-            except Exception:
-                pass
+            except Exception as _suppressed_exc:
+                logger.debug(f"_verify_single_tmpfs_invariant_async(): suppressed {type(_suppressed_exc).__name__}")
 
 if not _verify_single_tmpfs_invariant():
     _sys.exit(3)
@@ -832,8 +841,8 @@ def get_coords_for_city(city_norm: str) -> Optional[Tuple[float, float]]:
     return _GEO_COORDS_BY_CITY.get(city_norm.lower().strip())
 
 # v6.2: in-memory Fernet decryption helper with timeout
-import signal
-
+# RELIABILITY-FIX: `signal` is already imported at module level (line 53); this
+# second import shadowed it for the rest of the module (ruff F811).
 def _fernet_decrypt_bytes(encrypted_bytes: bytes, key: bytes, timeout_s: float = 5.0) -> bytes:
     """Decrypt a Fernet-encrypted blob in-memory (no temp file on disk).
     v6.2: Added timeout to prevent DoS from corrupted tokens.
@@ -1368,8 +1377,8 @@ def is_display_ready(display: str, timeout: float = 5.0) -> bool:
                 capture_output=True, timeout=timeout
             )
             return proc.returncode == 0
-        except Exception:
-            pass
+        except Exception as _suppressed_exc:
+            logger.debug(f"is_display_ready(): suppressed {type(_suppressed_exc).__name__}")
     try:
         port = 6000 + int(display.replace(":", ""))
         # M29 fix: Socket fd leak. The previous code did
@@ -1390,8 +1399,8 @@ def is_display_ready(display: str, timeout: float = 5.0) -> bool:
         finally:
             try:
                 sock.close()
-            except Exception:
-                pass
+            except Exception as _suppressed_exc:
+                logger.debug(f"is_display_ready(): suppressed {type(_suppressed_exc).__name__}")
     except (ValueError, AttributeError, TypeError):
         return False
     except Exception:
@@ -1546,8 +1555,8 @@ def _panic_handler(signum, frame):
                     _parts = _ip_route.stdout.strip().split()
                     if "dev" in _parts:
                         _default_iface = _parts[_parts.index("dev") + 1]
-            except Exception:
-                pass
+            except Exception as _suppressed_exc:
+                logger.debug(f"_panic_handler(): suppressed {type(_suppressed_exc).__name__}")
             if not _default_iface:
                 _default_iface = "eth0"  # fallback
             subprocess.run(["tc", "qdisc", "del", "dev", _default_iface, "root"],
@@ -1564,8 +1573,8 @@ def _panic_handler(signum, frame):
             for child in current.children(recursive=True):
                 try:
                     child.kill()
-                except Exception:
-                    pass
+                except Exception as _suppressed_exc:
+                    logger.debug(f"_panic_handler(): suppressed {type(_suppressed_exc).__name__}")
     except Exception as e:
         logger.error(f"Panic handler step 2 (kill children) error: {e}")
     
@@ -1852,8 +1861,8 @@ def get_current_boot_id() -> str:
     except (TimeoutError, Exception):
         try:
             _signal.alarm(0)  # Ensure alarm is cancelled
-        except Exception:
-            pass
+        except Exception as _suppressed_exc:
+            logger.debug(f"get_current_boot_id(): suppressed {type(_suppressed_exc).__name__}")
     # Fallback: per-launch synthetic boot_id (32 hex chars, like real)
     return uuid.uuid4().hex
 
@@ -2098,8 +2107,8 @@ async def run_persona_pipeline(persona_id: str, task_name: str, task_payload: di
     _random_state = random.getstate()
     try:
         random.seed(int(hashlib.sha256(persona_id.encode('utf-8')).hexdigest()[:8], 16))
-    except Exception:
-        pass  # non-fatal
+    except Exception as _suppressed_exc:
+        logger.debug(f"run_persona_pipeline(): suppressed {type(_suppressed_exc).__name__}")
 
     # R7-DEEP-AUDIT-2 GAP 1.3 / 5.2: Compute geolocation coords for the
     # active city. Used to inject __sre_geo_coords into the browser init
@@ -2558,10 +2567,10 @@ async def run_persona_pipeline(persona_id: str, task_name: str, task_payload: di
                                         f"PPTC: Using proxy IP geo coords: "
                                         f"({_proxy_lat}, {_proxy_lon})"
                                     )
-                            except (json.JSONDecodeError, TypeError, ValueError):
+                            except (json.JSONDecodeError, TypeError, ValueError) as _suppressed_exc:
                                 # Plain text response (just an IP); no geo
                                 # available. Fall back to city center.
-                                pass
+                                logger.debug(f"run_persona_pipeline(): suppressed {type(_suppressed_exc).__name__}")
                 except Exception as _ip_geo_err:
                     logger.debug(f"PPTC: proxy IP geo lookup failed (non-fatal): {_ip_geo_err}")
         except ValueError as proxy_err:
@@ -2639,11 +2648,67 @@ async def run_persona_pipeline(persona_id: str, task_name: str, task_payload: di
                     os.makedirs(temp_extract, mode=0o755, exist_ok=True)
                     try:
                         # R7-SEC-001: Validate tar members for path traversal
+                        #
+                        # RELIABILITY-FIX H2: the previous check was
+                        #     os.path.abspath(member_path).startswith(
+                        #         os.path.abspath(temp_extract))
+                        # which is a prefix test without a separator. A member
+                        # named "../<profile>.tmp.extract.evil/x" resolves to a
+                        # SIBLING directory whose path string still starts with
+                        # temp_extract's, so it passed validation and was
+                        # written outside temp_extract -- into a directory the
+                        # cleanup rmtree() never touches, so it survived the
+                        # persona wipe.
+                        #
+                        # Three changes:
+                        #   1. compare against `base + os.sep` (and `== base`)
+                        #   2. realpath() both sides so a symlinked parent
+                        #      directory cannot fool the check
+                        #   3. reject device/fifo members, and reject symlink /
+                        #      hardlink members whose target resolves outside
+                        #      the extraction root
+                        base = os.path.realpath(temp_extract)
                         for member in tar.getmembers():
-                            member_path = os.path.join(temp_extract, member.name)
-                            if not os.path.abspath(member_path).startswith(os.path.abspath(temp_extract)):
+                            if member.type in (
+                                tarfile.CHRTYPE, tarfile.BLKTYPE, tarfile.FIFOTYPE
+                            ):
+                                raise ValueError(
+                                    f"Refusing device/fifo tar member: {member.name}"
+                                )
+                            member_path = os.path.realpath(
+                                os.path.join(base, member.name)
+                            )
+                            if member_path != base and not member_path.startswith(base + os.sep):
                                 raise ValueError(f"Path traversal detected in tar entry: {member.name}")
-                        tar.extractall(path=temp_extract)
+                            if member.issym() or member.islnk():
+                                # Links are allowed only when their target
+                                # resolves inside the extraction root.
+                                # (profile_archiver.py uses tar.add() with
+                                # dereference=False, so legitimate profiles can
+                                # contain internal symlinks -- banning all
+                                # links would break session restore.)
+                                link_target = (
+                                    member.linkname if member.issym()
+                                    else os.path.join(os.path.dirname(member.name), member.linkname)
+                                )
+                                link_abs = os.path.realpath(os.path.join(base, link_target))
+                                if link_abs != base and not link_abs.startswith(base + os.sep):
+                                    raise ValueError(
+                                        f"Refusing out-of-root link in tar entry: "
+                                        f"{member.name} -> {member.linkname}"
+                                    )
+                        # tarfile.extractall() only accepts `filter=` on Python
+                        # 3.12+. This image is playwright:jammy (Python 3.10),
+                        # so passing it unconditionally would raise TypeError
+                        # and break every session restore. Use it where it
+                        # exists; the manual checks above cover earlier versions.
+                        if sys.version_info >= (3, 12):
+                            tar.extractall(path=temp_extract, filter="data")  # noqa: S202
+                        else:
+                            # noqa: S202 - members are validated immediately
+                            # above (path containment, link targets, device
+                            # nodes). `filter=` does not exist before 3.12.
+                            tar.extractall(path=temp_extract)  # noqa: S202
                         # Wipe profile_path contents (keep .tmp) and swap
                         for entry in os.listdir(profile_path):
                             if entry == ".tmp":
@@ -2654,8 +2719,8 @@ async def run_persona_pipeline(persona_id: str, task_name: str, task_payload: di
                                     shutil.rmtree(entry_path, ignore_errors=True)
                                 else:
                                     os.unlink(entry_path)
-                            except Exception:
-                                pass
+                            except Exception as _suppressed_exc:
+                                logger.debug(f"run_persona_pipeline(): suppressed {type(_suppressed_exc).__name__}")
                         # Move temp_extract contents into profile_path
                         for entry in os.listdir(temp_extract):
                             os.rename(
@@ -2674,8 +2739,8 @@ async def run_persona_pipeline(persona_id: str, task_name: str, task_payload: di
                 # GC cycle.
                 try:
                     _tar_buf.close()
-                except Exception:
-                    pass
+                except Exception as _suppressed_exc:
+                    logger.debug(f"run_persona_pipeline(): suppressed {type(_suppressed_exc).__name__}")
             logger.info(f"In-memory decrypt + extract OK ({len(decrypted_bytes)} bytes -> {profile_path})")
         except Exception as arch_err:
             logger.warning(f"In-memory session archive decryption failed: {arch_err}")
@@ -2689,8 +2754,8 @@ async def run_persona_pipeline(persona_id: str, task_name: str, task_payload: di
                         shutil.rmtree(entry_path, ignore_errors=True)
                     else:
                         os.unlink(entry_path)
-                except Exception:
-                    pass
+                except Exception as _suppressed_exc:
+                    logger.debug(f"run_persona_pipeline(): suppressed {type(_suppressed_exc).__name__}")
         finally:
             # R7-DEEP-AUDIT-2 FIX: Fernet.decrypt() returns immutable
             # `bytes`, not `bytearray`. The previous `isinstance(..., bytearray)`
@@ -2874,8 +2939,8 @@ async def run_persona_pipeline(persona_id: str, task_name: str, task_payload: di
                     shutil.rmtree(sub_path, ignore_errors=True)
                 elif os.path.isfile(sub_path):
                     os.unlink(sub_path)
-            except Exception:
-                pass
+            except Exception as _suppressed_exc:
+                logger.debug(f"run_persona_pipeline(): suppressed {type(_suppressed_exc).__name__}")
         # For first-launch personas, also do a sweep of all other
         # entries (keep .tmp). For returning personas, only sweep
         # entries NOT in the persona's preserved set.
@@ -2889,8 +2954,8 @@ async def run_persona_pipeline(persona_id: str, task_name: str, task_payload: di
                         shutil.rmtree(entry_path, ignore_errors=True)
                     else:
                         os.unlink(entry_path)
-                except Exception:
-                    pass
+                except Exception as _suppressed_exc:
+                    logger.debug(f"run_persona_pipeline(): suppressed {type(_suppressed_exc).__name__}")
         else:
             # PPPC returning persona: only sweep top-level non-preserved
             # entries (e.g., crash reports, logs, singleton lock)
@@ -2904,8 +2969,8 @@ async def run_persona_pipeline(persona_id: str, task_name: str, task_payload: di
                         shutil.rmtree(entry_path, ignore_errors=True)
                     else:
                         os.unlink(entry_path)
-                except Exception:
-                    pass
+                except Exception as _suppressed_exc:
+                    logger.debug(f"run_persona_pipeline(): suppressed {type(_suppressed_exc).__name__}")
         if _is_returning_persona:
             logger.info(
                 f"PPPC: Returning persona — preserved Cookies/Local Storage, "
@@ -3041,8 +3106,8 @@ async def run_persona_pipeline(persona_id: str, task_name: str, task_payload: di
             try:
                 xvfb_process.terminate()
                 await xvfb_process.wait()
-            except Exception:
-                pass
+            except Exception as _suppressed_exc:
+                logger.debug(f"run_persona_pipeline(): suppressed {type(_suppressed_exc).__name__}")
         return False
 
     browser = None
@@ -3673,8 +3738,8 @@ async def run_persona_pipeline(persona_id: str, task_name: str, task_payload: di
             # is detectable.
             try:
                 _ = page.url  # touch to ensure page is initialized
-            except Exception:
-                pass
+            except Exception as _suppressed_exc:
+                logger.debug(f"run_persona_pipeline(): suppressed {type(_suppressed_exc).__name__}")
 
             # C2 fix: Call _clear_browser_storage on the FIRST page
             # (not just at browser close). The pre-launch filesystem
@@ -3847,8 +3912,8 @@ async def run_persona_pipeline(persona_id: str, task_name: str, task_payload: di
                         if pacing_engine:
                             try:
                                 await pacing_engine.record_load_latency(start_load_time)
-                            except Exception:
-                                pass
+                            except Exception as _suppressed_exc:
+                                logger.debug(f"run_persona_pipeline(): suppressed {type(_suppressed_exc).__name__}")
 
                     if decrypted_payload:
                         try:
@@ -3962,12 +4027,12 @@ async def run_persona_pipeline(persona_id: str, task_name: str, task_payload: di
                                     f"Persona {persona_id} reached {MAX_TASKS_PER_PERSONA} task limit",
                                     persona_id=persona_id
                                 )
-                    except PersonaRetiredError:
+                    except PersonaRetiredError as _suppressed_exc:
                         # Re-raise so the daemon loop sees it
                         # v5.0+: this is a normal retirement, not an error
                         # Let the task be marked completed (success=True),
                         # but the persona is now 'rotated' and won't be picked up.
-                        pass
+                        logger.debug(f"run_persona_pipeline(): suppressed {type(_suppressed_exc).__name__}")
                     except Exception as rc_err:
                         logger.warning(f"Task counter update failed: {rc_err}")
 
@@ -3997,8 +4062,8 @@ async def run_persona_pipeline(persona_id: str, task_name: str, task_payload: di
                             try:
                                 if child.name() in ["firefox", "chrome", "chromium", "node", "Xvfb"]:
                                     child.terminate()
-                            except Exception:
-                                pass
+                            except Exception as _suppressed_exc:
+                                logger.debug(f"run_persona_pipeline(): suppressed {type(_suppressed_exc).__name__}")
                     except Exception as child_kill_err:
                         logger.error(f"Cleanup failure: {child_kill_err}")
 
@@ -4007,8 +4072,8 @@ async def run_persona_pipeline(persona_id: str, task_name: str, task_payload: di
                 if pacing_engine:
                     try:
                         await pacing_engine.sleep_human_delay(base_delay=4.0, variance_factor=0.25)
-                    except Exception:
-                        pass
+                    except Exception as _suppressed_exc:
+                        logger.debug(f"run_persona_pipeline(): suppressed {type(_suppressed_exc).__name__}")
 
                 # v6.2: Session Pacing with human-like log-normal distribution
                 # (replaces the uniform random.uniform calls that were
@@ -4072,8 +4137,8 @@ async def run_persona_pipeline(persona_id: str, task_name: str, task_payload: di
                         persona_digest = None
                         import gc
                         gc.collect()
-                except Exception:
-                    pass
+                except Exception as _suppressed_exc:
+                    logger.debug(f"run_persona_pipeline(): suppressed {type(_suppressed_exc).__name__}")
 
                 # BEN-9 (Pass 14): Now safe to drop decrypted_payload
                 # after BOTH restore_session_state and restore_local_storage
@@ -4105,9 +4170,9 @@ async def run_persona_pipeline(persona_id: str, task_name: str, task_payload: di
         try:
             if _random_state is not None:
                 random.setstate(_random_state)
-        except Exception:
+        except Exception as _suppressed_exc:
             # Non-fatal; the state is just slightly off.
-            pass
+            logger.debug(f"run_persona_pipeline(): suppressed {type(_suppressed_exc).__name__}")
 
         # A4 fix (Pass 16): Close the page explicitly before closing
         # the browser. The previous code only closed the browser,
@@ -4139,8 +4204,8 @@ async def run_persona_pipeline(persona_id: str, task_name: str, task_payload: di
                 except Exception as clear_err:
                     logger.warning(f"Pre-close storage clear failed: {clear_err}")
                 await browser.close()
-            except Exception:
-                pass
+            except Exception as _suppressed_exc:
+                logger.debug(f"run_persona_pipeline(): suppressed {type(_suppressed_exc).__name__}")
         # v6.2: Ensure ALL child processes are terminated, not just direct
         # children. Use process group kill to catch GPU/renderer/network
         # processes that may have escaped the parent-child tracking.
@@ -4174,15 +4239,22 @@ async def run_persona_pipeline(persona_id: str, task_name: str, task_payload: di
                     try:
                         if child.name().lower() in ('chrome', 'chromium', 'firefox', 'xvfb'):
                             child.terminate()
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        pass
+                    except (psutil.NoSuchProcess, psutil.AccessDenied) as _suppressed_exc:
+                        logger.debug(f"run_persona_pipeline(): suppressed {type(_suppressed_exc).__name__}")
                 # Wait for terminated processes
-                gone, alive = psutil.wait_procs(parent.children(recursive=True), timeout=5.0)
+                #
+                # RELIABILITY-FIX L3: psutil.wait_procs() is a blocking call and
+                # this is an `async def`, so it stalled the event loop for up to
+                # 5s. Offloaded to the default executor so the loop keeps running.
+                _children = parent.children(recursive=True)
+                gone, alive = await asyncio.get_running_loop().run_in_executor(
+                    None, lambda: psutil.wait_procs(_children, timeout=5.0)
+                )
                 for p in alive:
                     try:
                         p.kill()
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        pass
+                    except (psutil.NoSuchProcess, psutil.AccessDenied) as _suppressed_exc:
+                        logger.debug(f"run_persona_pipeline(): suppressed {type(_suppressed_exc).__name__}")
             except Exception as zombie_err:
                 logger.warning(f"Zombie cleanup error: {zombie_err}")
         # C4 fix: TLS session tickets / cache flush synchronization.
@@ -4220,10 +4292,10 @@ async def run_persona_pipeline(persona_id: str, task_name: str, task_payload: di
                                 if _pn in ('chrome', 'chromium', 'firefox', 'xvfb'):
                                     if _p.is_running() and _p.status() != psutil.STATUS_ZOMBIE:
                                         _alive_chrome.append(_p.pid)
-                            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                pass
-                    except Exception:
-                        pass
+                            except (psutil.NoSuchProcess, psutil.AccessDenied) as _suppressed_exc:
+                                logger.debug(f"run_persona_pipeline(): suppressed {type(_suppressed_exc).__name__}")
+                    except Exception as _suppressed_exc:
+                        logger.debug(f"run_persona_pipeline(): suppressed {type(_suppressed_exc).__name__}")
                     if not _alive_chrome:
                         break
                     logger.debug(
@@ -4245,8 +4317,8 @@ async def run_persona_pipeline(persona_id: str, task_name: str, task_payload: di
                             os.unlink(entry_path)
                         elif os.path.isdir(entry_path):
                             shutil.rmtree(entry_path, ignore_errors=True)
-                    except Exception:
-                        pass
+                    except Exception as _suppressed_exc:
+                        logger.debug(f"run_persona_pipeline(): suppressed {type(_suppressed_exc).__name__}")
             except Exception as clean_err:
                 logger.error(f"Error wiping task tmpfs: {clean_err}")
 
@@ -4447,10 +4519,12 @@ async def orchestrator_daemon_loop():
                                 logger.warning(f"Sweeper: terminating orphan PID {proc.info['pid']} ({proc_basename})")
                                 try:
                                     proc.terminate()
-                                except Exception:
-                                    pass
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        pass
+                                except Exception as _suppressed_exc:
+                                    logger.debug(
+                                        f"orchestrator_daemon_loop(): suppressed {type(_suppressed_exc).__name__}"
+                                    )
+                    except (psutil.NoSuchProcess, psutil.AccessDenied) as _suppressed_exc:
+                        logger.debug(f"orchestrator_daemon_loop(): suppressed {type(_suppressed_exc).__name__}")
             except Exception as sweep_err:
                 logger.error(f"Sweeper failure: {sweep_err}")
 
@@ -4609,8 +4683,10 @@ async def orchestrator_daemon_loop():
                                     ),
                                     timeout=1.0
                                 )
-                            except Exception:
-                                pass  # non-fatal
+                            except Exception as _suppressed_exc:
+                                logger.debug(
+                                    f"orchestrator_daemon_loop(): suppressed {type(_suppressed_exc).__name__}"
+                                )
                 except asyncio.TimeoutError:
                     logger.warning(
                         f"PPPC: Lookup timed out for city '{_city}' (task {task_id}); "
@@ -4668,8 +4744,10 @@ async def orchestrator_daemon_loop():
                             if ppc_conn is not None:
                                 try:
                                     await db_pool.release(ppc_conn)
-                                except Exception:
-                                    pass
+                                except Exception as _suppressed_exc:
+                                    logger.debug(
+                                        f"orchestrator_daemon_loop(): suppressed {type(_suppressed_exc).__name__}"
+                                    )
                                 ppc_conn = None
                             # Re-acquire with the same timeout
                             ppc_conn = await asyncio.wait_for(
@@ -4740,8 +4818,8 @@ async def orchestrator_daemon_loop():
                                     f"PPPC: connection terminate "
                                     f"error (non-fatal): {term_err}"
                                 )
-                        except Exception:
-                            pass
+                        except Exception as _suppressed_exc:
+                            logger.debug(f"orchestrator_daemon_loop(): suppressed {type(_suppressed_exc).__name__}")
 
             # R7-DEEP-AUDIT-2 GAP 2.3: Re-query the task to get the
             # authoritative persona_id (in case another process updated
@@ -4753,8 +4831,8 @@ async def orchestrator_daemon_loop():
                     )
                     if _auth_row and _auth_row['persona_id']:
                         persona_id = _auth_row['persona_id']
-            except Exception:
-                pass  # non-fatal; keep the in-memory persona_id
+            except Exception as _suppressed_exc:
+                logger.debug(f"orchestrator_daemon_loop(): suppressed {type(_suppressed_exc).__name__}")
 
             # v5.0+: per-persona SOCKS5 port
             socks5_port = get_socks5_port_for_persona(persona_id)
@@ -4971,8 +5049,8 @@ async def _do_shutdown(sig_name):
         try:
             holders = getattr(db_pool, '_holders', None) or []
             in_flight = sum(1 for h in holders if getattr(h, '_in_use', False))
-        except Exception:
-            pass
+        except Exception as _suppressed_exc:
+            logger.debug(f"_do_shutdown(): suppressed {type(_suppressed_exc).__name__}")
         if in_flight == 0:
             break
         logger.info(f"Drain: {in_flight} db_pool operations in flight; waiting")
@@ -4980,35 +5058,46 @@ async def _do_shutdown(sig_name):
 
     # v5.0+: clean tc qdisc on shutdown
     # R7-HOR-029: Detect default interface dynamically.
+    #
+    # RELIABILITY-FIX L3: this used three blocking subprocess.run() calls inside
+    # an `async def`, stalling the event loop for up to ~6s during shutdown.
+    # The identical block in _panic_handler() is left synchronous on purpose --
+    # a signal handler cannot await.
+    async def _run_cmd(*args, timeout=2.0):
+        """Run a command without blocking the event loop. Returns (rc, stdout)."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            return proc.returncode, (stdout or b"").decode("utf-8", "replace")
+        except (asyncio.TimeoutError, OSError, FileNotFoundError):
+            return None, ""
+
     try:
-        if subprocess.run(["which", "tc"], capture_output=True, timeout=2).returncode == 0:
+        _which_rc, _ = await _run_cmd("which", "tc")
+        if _which_rc == 0:
             _default_iface = None
-            try:
-                _ip_route = subprocess.run(
-                    ["ip", "route", "show", "default"],
-                    capture_output=True, text=True, timeout=2
-                )
-                if _ip_route.returncode == 0 and _ip_route.stdout.strip():
-                    _parts = _ip_route.stdout.strip().split()
-                    if "dev" in _parts:
-                        _default_iface = _parts[_parts.index("dev") + 1]
-            except Exception:
-                pass
+            _route_rc, _route_out = await _run_cmd("ip", "route", "show", "default")
+            if _route_rc == 0 and _route_out.strip():
+                _parts = _route_out.strip().split()
+                if "dev" in _parts:
+                    _default_iface = _parts[_parts.index("dev") + 1]
             if not _default_iface:
                 _default_iface = "eth0"  # fallback
-            subprocess.run(["tc", "qdisc", "del", "dev", _default_iface, "root"],
-                          capture_output=True, timeout=2)
-            subprocess.run(["tc", "qdisc", "del", "dev", "lo", "root"],
-                          capture_output=True, timeout=2)
-    except Exception:
-        pass
+            await _run_cmd("tc", "qdisc", "del", "dev", _default_iface, "root")
+            await _run_cmd("tc", "qdisc", "del", "dev", "lo", "root")
+    except Exception as _suppressed_exc:
+        logger.debug(f"_do_shutdown(): suppressed {type(_suppressed_exc).__name__}")
 
     # v5.0+: wipe per-task tmpfs
     if ORCH_TASK_TMPFS_DIR and os.path.isdir(ORCH_TASK_TMPFS_DIR):
         try:
             shutil.rmtree(ORCH_TASK_TMPFS_DIR, ignore_errors=True)
-        except Exception:
-            pass
+        except Exception as _suppressed_exc:
+            logger.debug(f"_do_shutdown(): suppressed {type(_suppressed_exc).__name__}")
 
     if db_pool:
         try:
@@ -5017,6 +5106,45 @@ async def _do_shutdown(sig_name):
             logger.error(f"DB pool close error: {e}")
 
     logger.info("Graceful shutdown completed.")
+
+
+# RELIABILITY-FIX H0/M3: strong references to in-flight shutdown tasks.
+#
+# The previous code did `asyncio.create_task(handle_graceful_shutdown(...))`
+# inside the signal callback and discarded the returned Task. Two consequences:
+#
+#   1. (M3) Nothing awaited it and no done-callback was attached, so any
+#      exception raised inside the shutdown coroutine was only reported by
+#      asyncio's fallback handler at GC time -- via logging.getLogger("asyncio"),
+#      NOT our loguru pipeline, so it never reached the application logs.
+#   2. (H0) The `__main__` finally block called asyncio.all_tasks(loop), which
+#      INCLUDED the still-running shutdown task, and cancelled it. The shutdown
+#      always loses that race: _do_shutdown() begins with a drain loop that
+#      awaits asyncio.sleep(0.2) for up to 5s, so it is always mid-await when
+#      the daemon loop returns. Result: tmpfs wipe, db_pool.close() and
+#      tc qdisc cleanup never ran on ANY SIGTERM/SIGINT, and the resulting
+#      CancelledError was swallowed by gather(return_exceptions=True).
+#
+# Holding the tasks in this set both keeps them alive and lets the finally
+# block exclude them from the blanket cancel.
+_SHUTDOWN_TASKS: set = set()
+
+
+def _on_shutdown_signal(sig):
+    """RELIABILITY-FIX H0/M3: spawn the shutdown coroutine, keeping a reference."""
+    task = asyncio.create_task(handle_graceful_shutdown(sig.name))
+    _SHUTDOWN_TASKS.add(task)
+    task.add_done_callback(_SHUTDOWN_TASKS.discard)
+
+    def _report(task_future):
+        if task_future.cancelled():
+            logger.error("Graceful shutdown task was cancelled before completing")
+            return
+        exc = task_future.exception()
+        if exc is not None:
+            logger.error(f"Graceful shutdown raised {type(exc).__name__}: {exc}")
+
+    task.add_done_callback(_report)
 
 
 def register_shutdown_signals(loop):
@@ -5030,10 +5158,7 @@ def register_shutdown_signals(loop):
     """
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
-            loop.add_signal_handler(
-                sig,
-                lambda s=sig: asyncio.create_task(handle_graceful_shutdown(s.name))
-            )
+            loop.add_signal_handler(sig, _on_shutdown_signal, sig)
         except (NotImplementedError, RuntimeError) as e:
             logger.warning(f"Could not register signal handler for {sig}: {e}")
 
@@ -5065,13 +5190,13 @@ if __name__ == "__main__":
                 # is dead
                 try:
                     asyncio.run_coroutine_threadsafe(db_pool.close(), loop)
-                except Exception:
-                    pass
+                except Exception as _suppressed_exc:
+                    logger.debug(f"_main_cleanup(): suppressed {type(_suppressed_exc).__name__}")
             if ORCH_TASK_TMPFS_DIR and os.path.isdir(ORCH_TASK_TMPFS_DIR):
                 try:
                     shutil.rmtree(ORCH_TASK_TMPFS_DIR, ignore_errors=True)
-                except Exception:
-                    pass
+                except Exception as _suppressed_exc:
+                    logger.debug(f"_main_cleanup(): suppressed {type(_suppressed_exc).__name__}")
             # M2 fix: Zero the Fernet key buffer from memory on shutdown.
             # Without this, the key persists in RAM for the lifetime of
             # the process and is included in any core dump (if dumps
@@ -5098,27 +5223,56 @@ if __name__ == "__main__":
         logger.info("Process interrupted manually.")
     finally:
         # v6.2: Final cleanup
+        #
+        # RELIABILITY-FIX H0: the previous code cancelled EVERY pending task,
+        # including the graceful-shutdown task spawned by the signal handler
+        # (see _SHUTDOWN_TASKS above). That cancelled the tmpfs wipe, the
+        # db_pool close and the tc qdisc cleanup on every SIGTERM/SIGINT, and
+        # gather(return_exceptions=True) hid the CancelledError.
+        #
+        # We now (1) let shutdown tasks finish first, under an overall timeout,
+        # and only then (2) cancel everything else.
         try:
-            pending = asyncio.all_tasks(loop)
-            for task in pending:
+            # NOTE: do NOT call asyncio.current_task() here. This finally block
+            # runs in synchronous code after run_until_complete() has returned,
+            # so there is no running loop; current_task() with no argument
+            # raises RuntimeError, and the `except Exception: pass` below would
+            # then silently skip the ENTIRE cleanup. asyncio.all_tasks(loop)
+            # takes the loop explicitly and is correct here.
+            pending = set(asyncio.all_tasks(loop))
+            # Never cancel our own shutdown.
+            for task in pending - _SHUTDOWN_TASKS:
                 task.cancel()
-            # Give cancelled tasks a chance to clean up
-            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-        except Exception:
-            pass
+            if _SHUTDOWN_TASKS:
+                try:
+                    loop.run_until_complete(asyncio.wait_for(
+                        asyncio.gather(*_SHUTDOWN_TASKS, return_exceptions=True),
+                        timeout=30.0,
+                    ))
+                except asyncio.TimeoutError:
+                    logger.error(
+                        "Shutdown tasks exceeded 30s in final cleanup; "
+                        "tmpfs/db_pool cleanup may be incomplete"
+                    )
+            rest = asyncio.all_tasks(loop) - _SHUTDOWN_TASKS
+            if rest:
+                # Give cancelled tasks a chance to clean up
+                loop.run_until_complete(asyncio.gather(*rest, return_exceptions=True))
+        except Exception as _suppressed_exc:
+            logger.debug(f"<module>(): suppressed {type(_suppressed_exc).__name__}")
         # R7-HOR-019: Explicit pool close here too, in case the
         # atexit handler runs after the loop is dead.
         try:
             if db_pool is not None:
                 loop.run_until_complete(db_pool.close())
-        except Exception:
-            pass
+        except Exception as _suppressed_exc:
+            logger.debug(f"<module>(): suppressed {type(_suppressed_exc).__name__}")
         # R7-HOR-027: Explicit tmpfs wipe
         try:
             if ORCH_TASK_TMPFS_DIR and os.path.isdir(ORCH_TASK_TMPFS_DIR):
                 shutil.rmtree(ORCH_TASK_TMPFS_DIR, ignore_errors=True)
-        except Exception:
-            pass
+        except Exception as _suppressed_exc:
+            logger.debug(f"<module>(): suppressed {type(_suppressed_exc).__name__}")
         # R7-HOR-021: Shutdown the Fernet executor to free threads.
         # M33 fix: Use wait=True with a tight timeout instead of
         # wait=False, cancel_futures=True. The previous code
@@ -5148,6 +5302,6 @@ if __name__ == "__main__":
             # Best-effort: fall back to immediate shutdown.
             try:
                 _fernet_executor.shutdown(wait=False, cancel_futures=True)
-            except Exception:
-                pass
+            except Exception as _suppressed_exc:
+                logger.debug(f"<module>(): suppressed {type(_suppressed_exc).__name__}")
         loop.close()

@@ -6,6 +6,12 @@
 # the integration points. Copy these snippets into your orchestrator.
 
 import asyncio
+# RELIABILITY-FIX L5: this module had no logger at all.
+import logging as _logging
+try:
+    from loguru import logger
+except ImportError:
+    logger = _logging.getLogger(__name__)
 from signature_rotation import (
     SignatureRotator,
     ProxyRotator,
@@ -79,8 +85,8 @@ async def action_loop(page, session: HumanizedSession,
             # Pick a random clickable element
             try:
                 await page.click("a, button", timeout=2000)
-            except Exception:
-                pass  # No clickable, treat as idle
+            except Exception as _suppressed_exc:
+                logger.debug(f"action_loop(): suppressed {type(_suppressed_exc).__name__}")
 
         elif action == ActionType.SCROLL:
             await page.mouse.wheel(0, 300)
@@ -91,14 +97,14 @@ async def action_loop(page, session: HumanizedSession,
         elif action == ActionType.BACK:
             try:
                 await page.go_back()
-            except Exception:
-                pass
+            except Exception as _suppressed_exc:
+                logger.debug(f"action_loop(): suppressed {type(_suppressed_exc).__name__}")
 
         elif action == ActionType.HOVER:
             try:
                 await page.hover("a, button", timeout=2000)
-            except Exception:
-                pass
+            except Exception as _suppressed_exc:
+                logger.debug(f"action_loop(): suppressed {type(_suppressed_exc).__name__}")
 
         # Wait a log-normal delay
         delay = await session.wait()

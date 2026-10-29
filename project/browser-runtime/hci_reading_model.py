@@ -142,8 +142,8 @@ async def execute_smooth_momentum_scroll(page, scroll_y: int, friction_coefficie
     _persona_id_s = None
     try:
         _persona_id_s = getattr(page.context, "_sre_persona_id", None) or getattr(page.context, "persona_id", None)
-    except Exception:
-        pass
+    except Exception as _suppressed_exc:
+        logger.debug(f"execute_smooth_momentum_scroll(): suppressed {type(_suppressed_exc).__name__}")
     # M13 fix: Use SHA-256 instead of MD5 (FIPS compatibility).
     _tremor_rng_seed = int(hashlib.sha256(
         f"scroll_tremor:{_persona_id_s or 'unknown'}:{scroll_y}".encode()
@@ -336,8 +336,8 @@ class HCIReadingModel:
             if await page.evaluate("() => document.hidden"):
                 logger.debug("HCI: Tab is hidden; skipping reading flow.")
                 return
-        except Exception:
-            pass
+        except Exception as _suppressed_exc:
+            logger.debug(f"HCIReadingModel.execute_saccadic_scroll(): suppressed {type(_suppressed_exc).__name__}")
 
         """
         Simulates human reading progression. Humans do not scroll smoothly;
@@ -475,7 +475,7 @@ class HCIReadingModel:
                     extra_dwell = float(self.rng.uniform(2.5, 5.0))
                     logger.info(f"HCI Content Density: Image element detected in viewport. Lingering {extra_dwell:.1f}s.")
             except Exception as density_err:
-                pass
+                logger.debug(f"HCIReadingModel.execute_saccadic_scroll(): suppressed {type(density_err).__name__}")
 
             # 1.5 Attention Heatmap Forensics: Implement Exponential Attention Decay
             # Real human attention decays exponentially as they scroll below the fold (F-Pattern/Gaze decay).
@@ -496,8 +496,10 @@ class HCIReadingModel:
                 logger.info("HCI: Focus/Blur Look-Away Fidget triggered. Emulating tab distraction...")
                 try:
                     await page.evaluate("window.dispatchEvent(new Event('blur'))")
-                except Exception:
-                    pass
+                except Exception as _suppressed_exc:
+                    logger.debug(
+                        f"HCIReadingModel.execute_saccadic_scroll(): suppressed {type(_suppressed_exc).__name__}"
+                    )
                 
                 # Cognitive distraction delay
                 distraction = float(self.rng.uniform(1.5, 3.5))
@@ -506,8 +508,10 @@ class HCIReadingModel:
                 # Re-gain focus and continue reading
                 try:
                     await page.evaluate("window.dispatchEvent(new Event('focus'))")
-                except Exception:
-                    pass
+                except Exception as _suppressed_exc:
+                    logger.debug(
+                        f"HCIReadingModel.execute_saccadic_scroll(): suppressed {type(_suppressed_exc).__name__}"
+                    )
                 await asyncio.sleep(max(0.1, block_dwell - distraction))
             else:
                 await asyncio.sleep(block_dwell)
@@ -786,14 +790,20 @@ class HCIReadingModel:
             if _mouse_down:
                 try:
                     await page.mouse.up()
-                except Exception:
-                    pass
+                except Exception as _suppressed_exc:
+                    logger.debug(
+                        f"HCIReadingModel.execute_anatomical_double_click(): "
+                        f"suppressed {type(_suppressed_exc).__name__}"
+                    )
             # Release any modifier keys that may be stuck down
             for mod in _MODIFIER_KEYS:
                 try:
                     await page.keyboard.up(mod)
-                except Exception:
-                    pass
+                except Exception as _suppressed_exc:
+                    logger.debug(
+                        f"HCIReadingModel.execute_anatomical_double_click(): "
+                        f"suppressed {type(_suppressed_exc).__name__}"
+                    )
             raise
         except Exception:
             # L12: Same cleanup for any other exception (not just
@@ -803,13 +813,19 @@ class HCIReadingModel:
             if _mouse_down:
                 try:
                     await page.mouse.up()
-                except Exception:
-                    pass
+                except Exception as _suppressed_exc:
+                    logger.debug(
+                        f"HCIReadingModel.execute_anatomical_double_click(): "
+                        f"suppressed {type(_suppressed_exc).__name__}"
+                    )
             for mod in _MODIFIER_KEYS:
                 try:
                     await page.keyboard.up(mod)
-                except Exception:
-                    pass
+                except Exception as _suppressed_exc:
+                    logger.debug(
+                        f"HCIReadingModel.execute_anatomical_double_click(): "
+                        f"suppressed {type(_suppressed_exc).__name__}"
+                    )
             raise
 
     async def simulate_idle_period(self, page, duration_s: float = None):
@@ -836,8 +852,8 @@ class HCIReadingModel:
         logger.info(f"HCI: Simulating idle period of {duration_s:.1f}s (user walked away).")
         try:
             await page.evaluate("window.dispatchEvent(new Event('blur'))")
-        except Exception:
-            pass
+        except Exception as _suppressed_exc:
+            logger.debug(f"HCIReadingModel.simulate_idle_period(): suppressed {type(_suppressed_exc).__name__}")
         # Split the idle into smaller chunks so the task timeout doesn't
         # abort us. 60s per chunk is enough to not stress the event loop.
         chunk_s = min(60.0, duration_s)
@@ -848,8 +864,8 @@ class HCIReadingModel:
             elapsed += sleep_for
         try:
             await page.evaluate("window.dispatchEvent(new Event('focus'))")
-        except Exception:
-            pass
+        except Exception as _suppressed_exc:
+            logger.debug(f"HCIReadingModel.simulate_idle_period(): suppressed {type(_suppressed_exc).__name__}")
         logger.info("HCI: Idle period ended (user returned).")
 
 
@@ -928,15 +944,15 @@ class HCIReadingModel:
             logger.info(f"HCI: Tab-switch event triggered. Off-tab dwell: {off_dwell:.1f}s.")
             try:
                 await page.evaluate("window.dispatchEvent(new Event('blur'))")
-            except Exception:
-                pass
+            except Exception as _suppressed_exc:
+                logger.debug(f"HCIReadingModel.simulate_tab_switch(): suppressed {type(_suppressed_exc).__name__}")
             # Cap the off-tab dwell at 15s (real users don't look away
             # for an hour from a single form task)
             await asyncio.sleep(off_dwell)
             try:
                 await page.evaluate("window.dispatchEvent(new Event('focus'))")
-            except Exception:
-                pass
+            except Exception as _suppressed_exc:
+                logger.debug(f"HCIReadingModel.simulate_tab_switch(): suppressed {type(_suppressed_exc).__name__}")
 
     async def move_with_fitts_overshoot(self, page, target_selector: str):
         """
@@ -955,8 +971,8 @@ class HCIReadingModel:
         try:
             await target.scroll_into_view_if_needed()
             await asyncio.sleep(self.rng.uniform(0.15, 0.35))
-        except Exception:
-            pass
+        except Exception as _suppressed_exc:
+            logger.debug(f"HCIReadingModel.move_with_fitts_overshoot(): suppressed {type(_suppressed_exc).__name__}")
 
         box = await target.bounding_box()
         if not box:

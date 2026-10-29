@@ -109,8 +109,11 @@ class TaskExecutor(BaseTask):
                         # defense in depth.
                         try:
                             parser.parser.SetDefaultEncoding("utf-8")
-                        except Exception:
-                            pass
+                        except Exception as _suppressed_exc:
+                            logger.debug(
+                                f"TaskExecutor.fetch_dynamic_rss_headline(): "
+                                f"suppressed {type(_suppressed_exc).__name__}"
+                            )
                         root = ET.fromstring(response.content, parser=parser)
                     headlines = []
                     for item in root.findall(".//item"):

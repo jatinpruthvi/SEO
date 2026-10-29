@@ -326,8 +326,8 @@ def _get_viewport_center(page) -> Tuple[int, int]:
             else:
                 return 960, 540
             return w // 2, h // 2
-    except Exception:
-        pass
+    except Exception as _suppressed_exc:
+        logger.debug(f"_get_viewport_center(): suppressed {type(_suppressed_exc).__name__}")
     return 960, 540
 
 
@@ -348,8 +348,8 @@ def _get_viewport_bounds(page) -> Tuple[int, int]:
                 return v.get("width", 1920), v.get("height", 1080)
             elif hasattr(v, 'width') and hasattr(v, 'height'):
                 return v.width, v.height
-    except Exception:
-        pass
+    except Exception as _suppressed_exc:
+        logger.debug(f"_get_viewport_bounds(): suppressed {type(_suppressed_exc).__name__}")
     return 1920, 1080
 
 
@@ -373,14 +373,14 @@ def _get_mouse_position(page) -> Tuple[int, int]:
         if x is not None and y is not None:
             try:
                 return int(x), int(y)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError) as _suppressed_exc:
                 # Non-numeric value (e.g., string). Fall back to
                 # viewport center. This is a defensive measure; the
                 # normal path only ever stores integers via
                 # _set_mouse_position's `round(float(x))` call.
-                pass
-    except Exception:
-        pass
+                logger.debug(f"_get_mouse_position(): suppressed {type(_suppressed_exc).__name__}")
+    except Exception as _suppressed_exc:
+        logger.debug(f"_get_mouse_position(): suppressed {type(_suppressed_exc).__name__}")
     return cx, cy
 
 
@@ -404,10 +404,10 @@ def _set_mouse_position(page, x: int, y: int) -> None:
         # Old names (deprecated, kept for backward compat with HM57)
         setattr(page, "mouse_x", x_rounded)
         setattr(page, "mouse_y", y_rounded)
-    except Exception:
+    except Exception as _suppressed_exc:
         # Page is a frozen class or proxy; silently skip.
         # The next call will use viewport center.
-        pass
+        logger.debug(f"_set_mouse_position(): suppressed {type(_suppressed_exc).__name__}")
 
 
 # HM2: Coordinate-space conversion. CSS pixels are the browser's
@@ -906,8 +906,11 @@ async def move_mouse_like_human(
                                     new_tx = max(0, min(vw - 1, int(new_tx_raw)))
                                     new_ty = max(0, min(vh - 1, int(new_ty_raw)))
                                     _replan_ok = True
-                        except (TypeError, ValueError):
-                            pass
+                        except (TypeError, ValueError) as _suppressed_exc:
+                            logger.debug(
+                                f"move_mouse_like_human._execute_move_loop(): "
+                                f"suppressed {type(_suppressed_exc).__name__}"
+                            )
                     if _replan_ok:
                         # Re-plan from current cursor to new target
                         current_x, current_y = x, y

@@ -749,9 +749,9 @@ class StickyProxyResolver:
                     "SPR36: StickyProxyResolver was not closed. "
                     "Call await resolver.close() before discarding."
                 )
-        except Exception:
+        except Exception as _suppressed_exc:
             # Never raise from __del__ — that masks the original error.
-            pass
+            logger.debug(f"StickyProxyResolver.__del__(): suppressed {type(_suppressed_exc).__name__}")
 
     # SPR1 + SPR6 + SPR7 + SPR8: Rewritten cache management
     # SPR41: All cache mutations are now lock-protected. Although asyncio
@@ -1900,7 +1900,11 @@ class StickyProxyResolver:
             "liverpool": "gb", "leeds": "gb", "glasgow": "gb", "edinburgh": "gb",
             "cardiff": "gb", "belfast": "gb",
             # Other major non-US cities (for backup-pool geo matching)
-            "paris": "fr", "berlin": "de", "madrid": "es", "rome": "it",
+            # RELIABILITY-FIX L4: "berlin" was duplicated here and in the
+            # German states block above (ruff F601). The second literal silently
+            # overrode the first; harmless while both mapped to "de", but a trap
+            # the moment either value is edited. Berlin is covered above.
+            "paris": "fr", "madrid": "es", "rome": "it",
             "amsterdam": "nl", "vienna": "at", "zurich": "ch", "geneva": "ch",
             "stockholm": "se", "oslo": "no", "copenhagen": "dk", "helsinki": "fi",
             "athens": "gr", "lisbon": "pt", "warsaw": "pl", "prague": "cz",
@@ -1951,9 +1955,9 @@ def _canonicalize_proxy_url(proxy_url: str) -> str:
                 ipaddress.IPv6Address(bare_host)
                 # Use the bare host (without zone ID) in the brackets
                 host = f"[{bare_host}]"
-            except (ipaddress.AddressValueError, ValueError):
+            except (ipaddress.AddressValueError, ValueError) as _suppressed_exc:
                 # Not IPv6; keep as-is
-                pass
+                logger.debug(f"_canonicalize_proxy_url(): suppressed {type(_suppressed_exc).__name__}")
         # Default ports per scheme
         default_ports = {"http": 80, "https": 443, "socks5": 1080, "socks5h": 1080}
         port = parsed.port

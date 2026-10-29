@@ -70,6 +70,13 @@ import os as _os  # KE4: for BE_AUTOCOMPLETE_TIMEOUT_MS env var
 import random
 import time  # C7 fix (Pass 15): for human_clear_field overall timeout
 import hashlib  # R7-DEEP-AUDIT-2 GAP 6.2: per-persona seed
+# RELIABILITY-FIX L5: `logger` was only imported locally inside a single
+# function (line ~557), so it was unavailable for module-wide diagnostics.
+import logging as _logging
+try:
+    from loguru import logger
+except ImportError:
+    logger = _logging.getLogger(__name__)
 
 # R7-DEEP-AUDIT-2 GAP 6.2: Per-persona seeded random. The previous
 # code used the global random module throughout, producing
@@ -403,8 +410,8 @@ def _is_credential_field(selector: str, element=None) -> bool:
         try:
             # element might be a Locator, not a handle
             pass
-        except Exception:
-            pass
+        except Exception as _suppressed_exc:
+            logger.debug(f"_is_credential_field(): suppressed {type(_suppressed_exc).__name__}")
     return False
 
 
@@ -454,8 +461,8 @@ async def human_bulk_type(page, selector, text: str, profile=None, sample_size: 
     # Click the field
     try:
         await page.click(selector, timeout=5000)
-    except Exception:
-        pass
+    except Exception as _suppressed_exc:
+        logger.debug(f"human_bulk_type(): suppressed {type(_suppressed_exc).__name__}")
     # If text is short, just type normally
     if len(text) <= sample_size * 2 + 4:
         if profile is not None:
@@ -559,8 +566,8 @@ async def human_type_words(page, selector, text: str, before_typing: list = None
         # Ensure Shift is released on timeout
         try:
             await page.keyboard.up("Shift")
-        except Exception:
-            pass
+        except Exception as _suppressed_exc:
+            logger.debug(f"human_type_words(): suppressed {type(_suppressed_exc).__name__}")
 
 
 async def _human_type_words_impl(page, selector, text, before_typing,
@@ -648,8 +655,8 @@ async def _human_type_words_impl(page, selector, text, before_typing,
         )
         # Log warning if focus may have failed (not a hard error since
         # some elements don't have id/name)
-    except Exception:
-        pass
+    except Exception as _suppressed_exc:
+        logger.debug(f"_human_type_words_impl(): suppressed {type(_suppressed_exc).__name__}")
 
     # Field Pre-Inspection Pause
     base_dwell = 0.220
@@ -721,8 +728,8 @@ async def _human_type_words_impl(page, selector, text, before_typing,
                         el.dispatchEvent(new Event('input', { bubbles: true }));
                         el.dispatchEvent(new Event('change', { bubbles: true }));
                     }""", await element.element_handle())
-                except Exception:
-                    pass
+                except Exception as _suppressed_exc:
+                    logger.debug(f"_human_type_words_impl(): suppressed {type(_suppressed_exc).__name__}")
                 from loguru import logger
                 logger.info("Autocomplete: field filled by browser suggestion; skipping re-type")
                 return
@@ -1040,8 +1047,8 @@ async def _human_type_words_impl(page, selector, text, before_typing,
         # KE19: Ensure Shift is released on cancellation
         try:
             await page.keyboard.up("Shift")
-        except Exception:
-            pass
+        except Exception as _suppressed_exc:
+            logger.debug(f"_human_type_words_impl(): suppressed {type(_suppressed_exc).__name__}")
         # A8 fix (Pass 16): Re-raise immediately. The previous
         # code raised CancelledError, then continued to compute
         # `post_delay` and `await _safe_sleep(post_delay)`. The
@@ -1072,8 +1079,8 @@ async def _human_type_words_impl(page, selector, text, before_typing,
         # KE19: Ensure Shift is released on any error
         try:
             await page.keyboard.up("Shift")
-        except Exception:
-            pass
+        except Exception as _suppressed_exc:
+            logger.debug(f"_human_type_words_impl(): suppressed {type(_suppressed_exc).__name__}")
         raise
 
     # A8 fix (Pass 16): Compute `post_delay` only if the task is
@@ -1165,8 +1172,8 @@ async def _handle_keyboard_shortcut(page, shortcut: str, profile) -> None:
         if _mod_down:
             try:
                 await page.keyboard.up(mod)
-            except Exception:
-                pass
+            except Exception as _suppressed_exc:
+                logger.debug(f"_handle_keyboard_shortcut(): suppressed {type(_suppressed_exc).__name__}")
 
 
 async def human_clear_field(page, selector):

@@ -81,8 +81,8 @@ async def human_copy_paste_workflow(page, element_selector, text_content, person
             from keyboard_emulator import human_type_words
             await human_type_words(page, element_selector, text_content)
             return
-    except Exception:
-        pass  # assume allowed
+    except Exception as _suppressed_exc:
+        logger.debug(f"human_copy_paste_workflow(): suppressed {type(_suppressed_exc).__name__}")
 
     # 1. Focus on the target element
     element = page.locator(element_selector)
@@ -132,8 +132,8 @@ async def human_copy_paste_workflow(page, element_selector, text_content, person
         # in some Chrome versions, but better than no paste)
         try:
             await page.evaluate(f"navigator.clipboard.writeText({json.dumps(text_content)})")
-        except Exception:
-            pass
+        except Exception as _suppressed_exc:
+            logger.debug(f"human_copy_paste_workflow(): suppressed {type(_suppressed_exc).__name__}")
 
     await asyncio.sleep(_get_paste_rng(persona_id).uniform(0.2, 0.5))
 

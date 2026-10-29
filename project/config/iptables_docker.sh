@@ -27,14 +27,26 @@ sudo iptables -F DOCKER-USER
 # Allow established container traffic
 sudo iptables -A DOCKER-USER -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 
-# SRE Network Hardening Whitelists: Prevent host-level drop conflicts for egress proxies
-# 1. Whitelist proxy-sidecar-res egress (172.19.0.5) to connect to any port on the WAN
-# (Required for GOST to establish forward connections to your upstream residential proxy ports)
-sudo iptables -A DOCKER-USER -s 172.19.0.5 -j ACCEPT
+# ---------------------------------------------------------------------------
+# RELIABILITY-FIX M4: sidecar addresses are parameterised instead of hardcoded.
+# These are the *egress-net* addresses (docker-compose.yml: egress-net is
+# 172.19.0.0/24, internal-net is 172.18.0.0/24). The previous file hardcoded
+# them in two rules; if the subnet ever changes, the whitelist silently stops
+# matching and every container's egress dies with no obvious cause.
+# Override with: EGRESS_PROXY_IP=10.0.0.5 sudo -E ./iptables_docker.sh
+# ---------------------------------------------------------------------------
+EGRESS_PROXY_IP="${EGRESS_PROXY_IP:-172.19.0.5}"   # proxy-sidecar-res on egress-net
+EGRESS_DOH_IP="${EGRESS_DOH_IP:-172.19.0.6}"       # doh-proxy on egress-net
 
-# 2. Whitelist doh-proxy (172.19.0.6) to connect to port 443 (DoH) over the WAN
-# (Required for cloudflared to resolve upstream DNS queries securely over HTTPS)
-sudo iptables -A DOCKER-USER -s 172.19.0.6 -p tcp --dport 443 -j ACCEPT
+# ---------------------------------------------------------------------------
+# ORDER MATTERS (RELIABILITY-FIX M4).
+#
+# The whitelist rules used to be appended BEFORE every DROP rule below. -j ACCEPT
+# terminates chain traversal, so the sidecars bypassed the DNS, mDNS, LLMNR,
+# SSDP and multicast blocks entirely -- including the ones added specifically to
+# stop local-network discovery leaks. All DROPs are now installed first, and the
+# whitelists punch through only what the sidecars actually need.
+# ---------------------------------------------------------------------------
 
 # DROP any container packet trying to route directly to external WAN interfaces bypassing proxy sidecars
 # (Ensures container-level IP leak protection even if container-level iptables fails)
@@ -74,6 +86,33 @@ sudo iptables -A DOCKER-USER -i docker0 -d 239.0.0.0/8 -j DROP
 # Block SSDP specifically (port 1900) - UPnP discovery protocol
 sudo iptables -A DOCKER-USER -i br-+ -p udp --dport 1900 -j DROP
 sudo iptables -A DOCKER-USER -i docker0 -p udp --dport 1900 -j DROP
+
+# RELIABILITY-FIX M4: UDP kill-switch catch-all.
+# Every DROP above is `-p tcp` (or a single UDP port). UDP to any other port on
+# any external destination -- QUIC/HTTP3 on 443, IKE/500, SNMP/161, or plain
+# exfiltration on a high port -- was therefore ALLOWED at the host layer, even
+# though this file's comment claims it is the backstop for "even if
+# container-level iptables fails". Now default-deny UDP as well.
+# (The per-container policy in entrypoint.sh is `-P OUTPUT DROP`, so this is
+# defence in depth -- it becomes load-bearing if a container ever runs without
+# NET_ADMIN, or that section is skipped.)
+sudo iptables -A DOCKER-USER -i br-+ -p udp -j DROP
+sudo iptables -A DOCKER-USER -i docker0 -p udp -j DROP
+
+# ---------------------------------------------------------------------------
+# SRE Network Hardening Whitelists (installed LAST - see ORDER MATTERS above).
+# ---------------------------------------------------------------------------
+# 1. Whitelist proxy-sidecar-res egress to connect to any port on the WAN
+# (Required for GOST to establish forward connections to your upstream residential proxy ports)
+# UDP is permitted because SOCKS5 UDP ASSOCIATE needs it, but only AFTER the
+# 53 / 5353 / 5355 / 1900 / multicast DROPs above, so the sidecar can no longer
+# use those for local-network discovery.
+sudo iptables -A DOCKER-USER -s "$EGRESS_PROXY_IP" -j ACCEPT
+
+# 2. Whitelist doh-proxy to connect to port 443 (DoH) over the WAN
+# (Required for cloudflared to resolve upstream DNS queries securely over HTTPS)
+sudo iptables -A DOCKER-USER -s "$EGRESS_DOH_IP" -p tcp --dport 443 -j ACCEPT
+
 # Block IPv6 to prevent IPv6-only IP-leak vectors
 sudo ip6tables -A DOCKER-USER -i br-+ -j DROP 2>/dev/null || true
 sudo ip6tables -A DOCKER-USER -i docker0 -j DROP 2>/dev/null || true

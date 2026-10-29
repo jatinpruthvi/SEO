@@ -1287,8 +1287,11 @@ class BehavioralEntropyGenerator:
                     jitter = self.rng.normal(0.0, _COMPOSITOR_JITTER_STD)
                 quantized_delay = max(quantize_interval * 0.5,
                                        quantized_delay + jitter)
-            except Exception:
-                pass  # If jitter fails, fall back to clean quantization
+            except Exception as _suppressed_exc:
+                logger.debug(
+                    f"BehavioralEntropyGenerator.generate_humanized_mouse_trajectory(): "
+                    f"suppressed {type(_suppressed_exc).__name__}"
+                )
 
             final_path.append((round(float(px)), round(float(py)), float(quantized_delay)))
             

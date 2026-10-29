@@ -35,6 +35,11 @@ import hashlib
 import json
 import math
 import random
+# RELIABILITY-FIX M6: session IDs must be unguessable. `random` is a Mersenne
+# Twister and is not cryptographically secure; `secrets` is.
+import secrets
+# RELIABILITY-FIX M5: replaces the predictable /tmp/cloak fallback directory.
+import tempfile
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -96,21 +101,35 @@ class SignatureRotator:
             # path (/tmp/cloak) as a last resort.
             try:
                 self.log_dir = Path("/var/log/cloak")
-                self.log_dir.mkdir(parents=True, exist_ok=True)
+                # RELIABILITY-FIX M5: the rotation log records persona IDs,
+                # session IDs and salts. It must not be world-readable.
+                self.log_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
             except (OSError, PermissionError):
                 try:
                     self.log_dir = Path.home() / ".local" / "share" / "cloak"
-                    self.log_dir.mkdir(parents=True, exist_ok=True)
+                    # RELIABILITY-FIX M5: 0o700. Note this fallback resolves
+                    # inside whatever directory the process was started from --
+                    # running the module's smoke test from a git checkout wrote
+                    # .local/share/cloak/signature_rotations.jsonl into the
+                    # working tree, where git picked it up and it was committed.
+                    self.log_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
                 except (OSError, PermissionError):
-                    # Last resort: use /tmp which is always writable
-                    self.log_dir = Path("/tmp/cloak")
+                    # Last resort: a private, unpredictable temp directory.
+                    # RELIABILITY-FIX M5: /tmp/cloak was a fixed path in a
+                    # world-writable directory, so any local user could
+                    # pre-create it (or symlink it elsewhere) before this ran.
                     try:
-                        self.log_dir.mkdir(parents=True, exist_ok=True)
+                        self.log_dir = Path(tempfile.mkdtemp(prefix="cloak-"))
                     except Exception:
-                        # If even /tmp fails (extremely unusual), operate
-                        # without a log dir. Rotation events will be
-                        # in-memory only (no persistent audit trail).
                         self.log_dir = None
+                    if self.log_dir is not None:
+                        try:
+                            self.log_dir.chmod(0o700)
+                        except Exception as _suppressed_exc:
+                            logger.debug(f"SignatureRotator.__init__(): suppressed {type(_suppressed_exc).__name__}")
+                    # If even mkdtemp fails (extremely unusual), log_dir stays
+                    # None: rotation events are in-memory only, with no
+                    # persistent audit trail.
         self._current_salt: int = self._compute_monthly_salt()
         self._session_id: str = ""
         self._rotation_log: List[Dict[str, Any]] = []
@@ -166,15 +185,23 @@ class SignatureRotator:
         the salt.
         """
         salt = self.get_current_salt()
-        # Session ID: salt + persona hash + timestamp. Deterministic
-        # within a session but unique per session.
+        # Session ID: salt + persona hash + unguessable nonce.
+        #
+        # RELIABILITY-FIX M6: the nonce used to be the Unix timestamp in hex,
+        # which made the whole ID predictable: the salt is just year*12+month
+        # (public), persona_hash is a stable 32-bit digest of the persona id,
+        # and the timestamp is guessable to within the session window. Anyone
+        # who observed one session ID could derive the salt and persona hash
+        # and use them as a durable per-persona correlator across sessions --
+        # and the same string seeds the behavioural RNGs (see _fnv1a_hash
+        # below), so predicting it meant predicting the behaviour.
+        #
+        # The deterministic persona_hash component is kept so the ID stays
+        # stable for a given persona where that is needed; secrets.token_hex()
+        # supplies the unguessable part.
         persona_hash = hashlib.sha256(persona_id.encode()).hexdigest()[:8]
-        timestamp = int(time.time())
-        # FIX #114: Pad timestamp hex to 10 chars for consistent length.
-        # 2^32 is current Unix timestamp range; 8 hex chars suffice.
-        # Use 10 to be future-proof.
-        ts_hex = f"{timestamp:010x}"
-        self._session_id = f"sess-{salt}-{persona_hash}-{ts_hex}"
+        nonce = secrets.token_hex(8)
+        self._session_id = f"sess-{salt}-{persona_hash}-{nonce}"
         # FIX #200: Don't log the full session_id (info leak). Log
         # just a truncated hash for correlation.
         truncated = hashlib.sha256(self._session_id.encode()).hexdigest()[:12]
@@ -254,8 +281,8 @@ class SignatureRotator:
                 log_file = self.log_dir / "signature_rotations.jsonl"
                 with open(log_file, "a") as f:
                     f.write(json.dumps(event) + "\n")
-            except OSError:
-                pass
+            except OSError as _suppressed_exc:
+                logger.debug(f"SignatureRotator._log_rotation_event(): suppressed {type(_suppressed_exc).__name__}")
 
     def get_stats(self) -> Dict[str, Any]:
         """Returns current rotation stats."""

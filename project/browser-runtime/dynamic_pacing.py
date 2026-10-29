@@ -132,8 +132,10 @@ class DynamicPacingEngine:
                     jitter_x = round(start_x + _pacing_rng.gauss(0, 0.7))
                     jitter_y = round(start_y + _pacing_rng.gauss(0, 0.7))
                     await move_mouse_like_human(page, start_x, start_y, jitter_x, jitter_y, steps=2)
-                except Exception:
-                    pass
+                except Exception as _suppressed_exc:
+                    logger.debug(
+                        f"DynamicPacingEngine.sleep_human_delay(): suppressed {type(_suppressed_exc).__name__}"
+                    )
         else:
             await asyncio.sleep(final_delay)
 
@@ -208,8 +210,10 @@ class DynamicPacingEngine:
                 adjust_y = start_y + int(pacing_rng.uniform(-15, 15))
                 await move_mouse_like_human(page, start_x, start_y, adjust_x, adjust_y, steps=8)
                 await asyncio.sleep(float(pacing_rng.uniform(0.15, 0.45)))
-            except Exception:
-                pass
+            except Exception as _suppressed_exc:
+                logger.debug(
+                    f"DynamicPacingEngine.execute_natural_reading_flow(): suppressed {type(_suppressed_exc).__name__}"
+                )
 
         logger.info("Pacing: Dynamic page reading completed successfully.")
         await self.sleep_human_delay(1.5, page=page)
@@ -252,8 +256,8 @@ async def simulate_idle_pattern(page, persona_id: str, total_duration_s: float =
     try:
         _last_x = getattr(page, "_sre_mouse_x", 960)
         _last_y = getattr(page, "_sre_mouse_y", 540)
-    except Exception:
-        pass
+    except Exception as _suppressed_exc:
+        logger.debug(f"simulate_idle_pattern(): suppressed {type(_suppressed_exc).__name__}")
 
     while elapsed < total_duration_s:
         # Active period: 30-180s
@@ -303,8 +307,8 @@ async def simulate_idle_pattern(page, persona_id: str, total_duration_s: float =
                 )
                 _last_x = _jitter_x
                 _last_y = _jitter_y
-            except Exception:
-                pass
+            except Exception as _suppressed_exc:
+                logger.debug(f"simulate_idle_pattern(): suppressed {type(_suppressed_exc).__name__}")
 
         # Idle period: no input (simulates user reading, watching video, etc.)
         _idle_actual = min(idle_period, total_duration_s - elapsed)

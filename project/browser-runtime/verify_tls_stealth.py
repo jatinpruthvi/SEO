@@ -128,10 +128,15 @@ async def verify_handshake(
         logger.info(f"Impersonating TLS ClientHello: {target}")
 
         def _do_request():
+            # RELIABILITY-FIX L2: requests has NO default timeout, so a hung
+            # endpoint would block this thread forever (and it is dispatched
+            # with asyncio.to_thread, so the worker is pinned indefinitely).
+            # verify_system_integrity.py:491 already passes timeout=8; match it.
             return requests.get(
                 "https://ja3er.com/json",
                 impersonate=target,
-                proxies=proxies
+                proxies=proxies,
+                timeout=8
             )
         try:
             resp = await asyncio.to_thread(_do_request)

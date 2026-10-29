@@ -96,8 +96,11 @@ class HardenedProfileArchiver:
                     if f_lower.endswith(".log") or f_lower == "telemetry.log" or "crash" in f_lower:
                         try:
                             os.unlink(os.path.join(root, f))
-                        except Exception:
-                            pass
+                        except Exception as _suppressed_exc:
+                            logger.debug(
+                                f"HardenedProfileArchiver.archive_profile_directory(): "
+                                f"suppressed {type(_suppressed_exc).__name__}"
+                            )
 
             logger.info(f"Archiver: Compressing pruned profile workspace directory: {source_dir}")
             # PRA-1: Use gzip compression. ~10x reduction on Chrome profiles
