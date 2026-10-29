@@ -355,6 +355,23 @@ MAX_CONCURRENT_PERSONAS = 1
 MAX_CRYPTO_WORKERS = _safe_getenv_int("MAX_CRYPTO_WORKERS", 1, min_value=1)
 PERSONA_PID_BUDGET = _safe_getenv_int("PERSONA_PID_BUDGET", 128, min_value=10)
 TASK_TIMEOUT_SECONDS = _safe_getenv_int("TASK_TIMEOUT_SECONDS", 2700, min_value=1)  # 45min
+
+# CONCURRENCY-FIX C2/C9: stable identity for this worker, used as the value of
+# tasks.claimed_by and personas.locked_by. Without it, two daemons are
+# indistinguishable in the lease columns and neither can tell whether a lock it
+# finds belongs to itself or to a peer. HOSTNAME is set by Docker; fall back to
+# the kernel hostname and finally to the PID so a bare-metal run still works.
+import socket as _socket
+WORKER_ID = (
+    os.getenv("HOSTNAME")
+    or _socket.gethostname()
+    or f"pid-{os.getpid()}"
+) + f":{os.getpid()}"
+
+# CONCURRENCY-FIX C2: how long a claimed task may stay in 'running' before the
+# reaper assumes its worker died and returns it to the queue. Derived from the
+# existing task timeout so a legitimately slow task is never recycled early.
+CLAIM_LEASE_GRACE_SECONDS = TASK_TIMEOUT_SECONDS + 300  # timeout + 5 min slack
 PAGE_LOAD_TIMEOUT = _safe_getenv_int("PAGE_LOAD_TIMEOUT", 30, min_value=1)
 TASKS_PER_BATCH = 1  # Sequential
 DAEMON_POLL_INTERVAL = _safe_getenv_int("DAEMON_POLL_INTERVAL", 5, min_value=1)
@@ -2235,6 +2252,10 @@ async def run_persona_pipeline(persona_id: str, task_name: str, task_payload: di
         }
 
     session_data = row['session_data']
+    # CONCURRENCY-FIX C7: remember the exact value we loaded. The session save
+    # at the end of run_persona_pipeline() compares against this so a
+    # concurrent session for the same persona cannot be silently overwritten.
+    _session_data_at_load = session_data
     assigned_proxy_url = row['assigned_proxy_url']
     signup_geo_region = row['signup_geo_region'] or "Dallas"
     ai_provider = row['ai_provider']
@@ -3964,10 +3985,29 @@ async def run_persona_pipeline(persona_id: str, task_name: str, task_payload: di
                 )
 
                 async with db_pool.acquire() as conn:
-                    await conn.execute("""
-                        UPDATE personas SET session_data = $1, last_active = NOW() WHERE id = $2
-                    """, encrypted_state, persona_id)
-                logger.info("Session state encrypted and saved.")
+                    # CONCURRENCY-FIX C7: compare-and-swap instead of a blind
+                    # overwrite. The previous statement was
+                    #     UPDATE personas SET session_data = $1 WHERE id = $2
+                    # which is last-writer-wins: two concurrent sessions for
+                    # one persona meant one session's encrypted cookies were
+                    # silently and permanently destroyed (verified).
+                    # `IS NOT DISTINCT FROM` also covers the NULL -> first
+                    # save transition, which `=` would not.
+                    saved = await conn.fetchrow("""
+                        UPDATE personas SET session_data = $1, last_active = NOW()
+                        WHERE id = $2 AND session_data IS NOT DISTINCT FROM $3
+                        RETURNING id
+                    """, encrypted_state, persona_id, _session_data_at_load)
+                if saved is None:
+                    logger.warning(
+                        f"CONCURRENCY C7: session save skipped for "
+                        f"{persona_id} - session_data changed since it was "
+                        f"loaded (another worker saved first). Refusing to "
+                        f"overwrite, rather than destroying one of the two "
+                        f"sessions."
+                    )
+                else:
+                    logger.info("Session state encrypted and saved.")
 
                 # R7-DEEP-AUDIT-2 FIX: After the DB write, the
                 # encrypted_state is no longer needed in this scope.
@@ -3985,11 +4025,20 @@ async def run_persona_pipeline(persona_id: str, task_name: str, task_payload: di
                 if success:
                     try:
                         async with db_pool.acquire() as conn:
-                            await conn.execute("""
+                            # CONCURRENCY-FIX C10: the increment was already
+                            # atomic, but the code then ran a SEPARATE
+                            # `SELECT task_count` before comparing it to
+                            # MAX_TASKS_PER_PERSONA. Between the two, another
+                            # worker could increment again, so the retirement
+                            # decision was made against a stale value.
+                            # RETURNING gives us the post-update count from
+                            # the same statement that changed it.
+                            new_count = await conn.fetchval("""
                                 UPDATE personas
                                 SET task_count = COALESCE(task_count, 0) + 1,
                                     last_active = NOW()
                                 WHERE id = $1
+                                RETURNING task_count
                             """, persona_id)
                             # R7-DEEP-AUDIT-2 GAP 1.8: PPTC personas
                             # need their task_count to be in sync with
@@ -4007,9 +4056,10 @@ async def run_persona_pipeline(persona_id: str, task_name: str, task_payload: di
                                         f"PPTC: persona task_count sync failed "
                                         f"(non-fatal): {sync_err}"
                                     )
-                            new_count = await conn.fetchval(
-                                "SELECT task_count FROM personas WHERE id = $1", persona_id
-                            )
+                            # CONCURRENCY-FIX C10: `new_count` now comes from
+                            # the UPDATE ... RETURNING above; this redundant
+                            # second SELECT is what allowed the retirement
+                            # check to race. Removed.
                             if new_count and new_count > MAX_TASKS_PER_PERSONA:
                                 logger.warning(
                                     f"Persona {persona_id} reached {new_count} tasks "
@@ -4037,9 +4087,25 @@ async def run_persona_pipeline(persona_id: str, task_name: str, task_payload: di
                         logger.warning(f"Task counter update failed: {rc_err}")
 
                 if success and task_name == "site_register" and task_payload.get("action") == "seasoning":
-                    new_stage = min(warmup_stage + 1, 7)
+                    # CONCURRENCY-FIX C8: increment in SQL instead of in
+                    # memory. `warmup_stage` was read at task start (line
+                    # ~2255), incremented in Python, then blind-written back.
+                    # Two workers both reading 3 and both writing 4 lose a
+                    # seasoning day, and a long-running task can clobber a
+                    # newer value with a staler one, moving the stage
+                    # backwards. This column is a safety gate -
+                    # tasks/site_register/executor.py blocks signup below 7 -
+                    # so drift here changes behaviour, not just bookkeeping.
                     async with db_pool.acquire() as conn:
-                        await conn.execute("UPDATE personas SET warmup_stage = $1 WHERE id = $2", new_stage, persona_id)
+                        new_stage = await conn.fetchval("""
+                            UPDATE personas
+                            SET warmup_stage = LEAST(COALESCE(warmup_stage, 0) + 1, 7)
+                            WHERE id = $1
+                            RETURNING warmup_stage
+                        """, persona_id)
+                        logger.info(
+                            f"Warmup stage for {persona_id} advanced to {new_stage}/7"
+                        )
 
                 try:
                     ch_for_db = json.dumps(client_hints) if client_hints is not None else None
@@ -4350,6 +4416,156 @@ async def run_persona_pipeline(persona_id: str, task_name: str, task_payload: di
 import datetime
 
 
+_RECLAIM_LAST_TS = 0.0
+_RECLAIM_INTERVAL_S = 60.0
+
+
+async def _reclaim_stalled_tasks() -> int:
+    """CONCURRENCY-FIX C2: recycle tasks whose worker died mid-execution.
+
+    A claimed task sits in status='running' until its worker finishes. If that
+    worker crashes, is OOM-killed, or the container is destroyed, nothing else
+    would ever pick the task up again. `claimed_at` plus a grace period derived
+    from TASK_TIMEOUT_SECONDS lets us detect and requeue those safely: a healthy
+    worker finishes (or is killed by its own timeout) well inside the window.
+    """
+    global _RECLAIM_LAST_TS
+    if db_pool is None:
+        return 0
+    now = time.time()
+    if now - _RECLAIM_LAST_TS < _RECLAIM_INTERVAL_S:
+        return 0
+    _RECLAIM_LAST_TS = now
+    try:
+        async with db_pool.acquire() as conn:
+            tag = await conn.execute(
+                "UPDATE tasks "
+                "SET status = 'pending', claimed_by = NULL, claimed_at = NULL "
+                "WHERE status = 'running' "
+                "  AND claimed_at IS NOT NULL "
+                "  AND claimed_at < NOW() - ($1 || ' seconds')::INTERVAL",
+                str(CLAIM_LEASE_GRACE_SECONDS),
+            )
+        recycled = int(str(tag).split()[-1]) if tag and str(tag).split() else 0
+        if recycled:
+            logger.warning(
+                f"CONCURRENCY C2: recycled {recycled} stalled task(s) "
+                f"whose lease expired (>{CLAIM_LEASE_GRACE_SECONDS}s)"
+            )
+        return recycled
+    except Exception as reclaim_err:
+        logger.debug(
+            f"_reclaim_stalled_tasks(): suppressed "
+            f"{type(reclaim_err).__name__}"
+        )
+        return 0
+
+
+async def _claim_tasks():
+    """CONCURRENCY-FIX C2/C6/C9: atomically claim up to TASKS_PER_BATCH tasks.
+
+    The previous code was a bare SELECT with no lock and no lease:
+
+        SELECT ... FROM tasks t
+        WHERE status IN ('pending','retry') ... ORDER BY created_at LIMIT $1
+
+    Nothing marked a row as taken between that SELECT and the eventual
+    `UPDATE tasks SET status='completed'`, so every daemon polling in the same
+    window received the SAME row and executed it. With two workers that put one
+    persona in two browsers at once: concurrent sessions on one account,
+    interleaved writes and the action performed twice.
+
+    This version, inside a single transaction:
+      1. `FOR UPDATE OF t SKIP LOCKED` - concurrent claimers skip each other's
+         rows instead of reading them.
+      2. An optimistic `UPDATE ... WHERE status IN ('pending','retry')` - the
+         real claim. 0 rows affected means a peer won the race.
+      3. A persona lease (`personas.locked_by/locked_until`) so no two workers
+         ever run two tasks for the same persona simultaneously (C9).
+      4. `cooldown_until` is honoured in the query itself (C6); previously the
+         queue happily handed out tasks for a cooling-down persona because the
+         filter only excluded 'limited'/'rotated'.
+
+    Leases self-heal: if this worker dies, `locked_until` expires and
+    `_reclaim_stalled_tasks()` requeues the work.
+    """
+    claimed = []
+    if db_pool is None:
+        return claimed
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            rows = await conn.fetch(
+                """
+                SELECT t.id, t.persona_id, t.platform, t.task_payload,
+                       t.status, t.failure_count
+                FROM tasks t
+                LEFT JOIN personas p ON p.id = t.persona_id
+                WHERE (t.status = 'pending'
+                       OR (t.status = 'retry' AND t.execution_time <= NOW()))
+                  AND (p.state IS NULL OR p.state NOT IN ('limited', 'rotated'))
+                  -- C6: honour the cooldown in the queue, not just by sleeping
+                  AND (p.cooldown_until IS NULL OR p.cooldown_until <= NOW())
+                  -- C9: never run two tasks for the same persona at once
+                  AND (p.locked_until IS NULL OR p.locked_until <= NOW())
+                ORDER BY t.created_at ASC
+                LIMIT $1
+                FOR UPDATE OF t SKIP LOCKED
+                """,
+                TASKS_PER_BATCH,
+            )
+            for row in rows:
+                tag = await conn.execute(
+                    "UPDATE tasks "
+                    "SET status = 'running', claimed_by = $1, claimed_at = NOW() "
+                    "WHERE id = $2 AND status IN ('pending', 'retry')",
+                    WORKER_ID, row['id'],
+                )
+                if not tag or not str(tag).endswith("1"):
+                    # A peer claimed this row between our SELECT and our UPDATE.
+                    continue
+                if row['persona_id']:
+                    ptag = await conn.execute(
+                        "UPDATE personas "
+                        "SET locked_by = $1, "
+                        "    locked_until = NOW() + ($2 || ' seconds')::INTERVAL "
+                        "WHERE id = $3 "
+                        "  AND (locked_until IS NULL OR locked_until <= NOW())",
+                        WORKER_ID, str(CLAIM_LEASE_GRACE_SECONDS),
+                        row['persona_id'],
+                    )
+                    if not ptag or not str(ptag).endswith("1"):
+                        # Lost the persona lease: hand the task straight back
+                        # rather than running it unlocked.
+                        await conn.execute(
+                            "UPDATE tasks "
+                            "SET status = 'pending', claimed_by = NULL, "
+                            "    claimed_at = NULL "
+                            "WHERE id = $1",
+                            row['id'],
+                        )
+                        continue
+                claimed.append(row)
+    return claimed
+
+
+async def _release_persona_leases(persona_ids) -> None:
+    """CONCURRENCY-FIX C9: drop the persona leases this worker still holds."""
+    if db_pool is None or not persona_ids:
+        return
+    try:
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE personas "
+                "SET locked_by = NULL, locked_until = NULL "
+                "WHERE id = any($1::varchar[]) AND locked_by = $2",
+                list(persona_ids), WORKER_ID,
+            )
+    except Exception as rel_err:
+        logger.debug(
+            f"_release_persona_leases(): suppressed {type(rel_err).__name__}"
+        )
+
+
 async def orchestrator_daemon_loop():
     """DC-19 (Pass 19): Main orchestrator loop.
 
@@ -4500,6 +4716,43 @@ async def orchestrator_daemon_loop():
                         logger.info("PPPC: personas.task_count column ensured")
                     except Exception as task_count_err:
                         logger.warning(f"PPPC: personas.task_count migration failed (non-fatal): {task_count_err}")
+
+                    # ------------------------------------------------------
+                    # CONCURRENCY-FIX C1/C2/C9: defensive migrations.
+                    #
+                    # C1 is the important one: the queue query selects
+                    # t.failure_count and both retry paths UPDATE it, but
+                    # no migration ever created that column. Against a
+                    # database built from database/schema.sql the very
+                    # first poll raised UndefinedColumnError, so the daemon
+                    # logged "Queue polling failed" and backed off to 300s
+                    # forever -- it never processed a single task.
+                    #
+                    # C2/C9 add the lease columns backing the atomic task
+                    # claim and the persona lock. All are idempotent, so
+                    # they are safe on a database that already has them.
+                    # ------------------------------------------------------
+                    _CONCURRENCY_MIGRATIONS = (
+                        ("tasks", "failure_count", "INT DEFAULT 0"),
+                        ("tasks", "claimed_by", "VARCHAR(128)"),
+                        ("tasks", "claimed_at", "TIMESTAMP WITH TIME ZONE"),
+                        ("personas", "locked_by", "VARCHAR(128)"),
+                        ("personas", "locked_until", "TIMESTAMP WITH TIME ZONE"),
+                    )
+                    for _tbl, _col, _type in _CONCURRENCY_MIGRATIONS:
+                        try:
+                            await conn.execute(
+                                f"ALTER TABLE {_tbl} "
+                                f"ADD COLUMN IF NOT EXISTS {_col} {_type}"
+                            )
+                        except Exception as mig_err:
+                            logger.warning(
+                                f"CONCURRENCY: migration {_tbl}.{_col} failed "
+                                f"(non-fatal): {mig_err}"
+                            )
+                    logger.info(
+                        "CONCURRENCY: task/persona lease columns ensured"
+                    )
                 else:
                     logger.critical("Could not locate database/schema.sql")
     except Exception as db_err:
@@ -4551,19 +4804,14 @@ async def orchestrator_daemon_loop():
         )
 
         # Acquire one task at a time
+        #
+        # CONCURRENCY-FIX C2/C6/C9: the bare SELECT that used to live here
+        # (no lock, no lease, no cooldown filter) has moved into
+        # _claim_tasks(), which claims atomically inside a transaction.
         try:
-            async with db_pool.acquire() as conn:
-                # v5.0+: filter 'rotated' and 'limited' personas
-                rows = await conn.fetch("""
-                    SELECT t.id, t.persona_id, t.platform, t.task_payload, t.status, t.failure_count
-                    FROM tasks t
-                    LEFT JOIN personas p ON p.id = t.persona_id
-                    WHERE (t.status = 'pending'
-                           OR (t.status = 'retry' AND t.execution_time <= NOW()))
-                      AND (p.state IS NULL OR p.state NOT IN ('limited', 'rotated'))
-                    ORDER BY t.created_at ASC
-                    LIMIT $1
-                """, TASKS_PER_BATCH)
+            # Requeue work abandoned by a worker that died mid-task.
+            await _reclaim_stalled_tasks()
+            rows = await _claim_tasks()
             # R7-DEEP-AUDIT-2: Reset DB failure backoff on success.
             orchestrator_daemon_loop._db_failure_count = 0
         except Exception as e:
@@ -4593,6 +4841,12 @@ async def orchestrator_daemon_loop():
             continue
 
         # Sequential processing (TASKS_PER_BATCH=1)
+        #
+        # CONCURRENCY-FIX C9: record which personas this batch holds a lease
+        # on, so they can be released once the batch is done. The lease also
+        # expires on its own (locked_until), so a crash here cannot deadlock a
+        # persona permanently.
+        _leased_personas = {r['persona_id'] for r in rows if r['persona_id']}
         for row in rows:
             if not daemon_running:
                 break
@@ -4850,8 +5104,14 @@ async def orchestrator_daemon_loop():
                 logger.info(f"Persona {persona_id} retired after task {task_id}; task marked completed.")
                 try:
                     async with db_pool.acquire() as conn:
+                        # CONCURRENCY-FIX C2: only the worker that still holds
+                        # the claim may finalise the task. Without this guard a
+                        # task recycled by the reaper (because this worker was
+                        # presumed dead) could be completed here AND re-run by
+                        # the worker that picked it up in the meantime.
                         await conn.execute(
-                            "UPDATE tasks SET status = 'completed', error_log = NULL WHERE id = $1",
+                            "UPDATE tasks SET status = 'completed', error_log = NULL "
+                            "WHERE id = $1 AND status = 'running'",
                             task_id
                         )
                 except Exception as db_err:
@@ -4960,7 +5220,10 @@ async def orchestrator_daemon_loop():
             try:
                 async with db_pool.acquire() as conn:
                     if result:
-                        await conn.execute("UPDATE tasks SET status = 'completed', error_log = NULL WHERE id = $1", task_id)
+                        # CONCURRENCY-FIX C2: guarded by the claim we still hold.
+                        await conn.execute(
+                            "UPDATE tasks SET status = 'completed', error_log = NULL "
+                            "WHERE id = $1 AND status = 'running'", task_id)
                         logger.info(f"Task ID {task_id} completed (persona {persona_id}).")
                     else:
                         new_failures = failures + 1
@@ -4975,12 +5238,20 @@ async def orchestrator_daemon_loop():
                         else:
                             cooldown_minutes = (2 ** new_failures) * 5
                             await conn.execute(
-                                "UPDATE tasks SET status = 'retry', failure_count = $1, execution_time = NOW() + ($2 || ' minutes')::INTERVAL WHERE id = $3",
+                                "UPDATE tasks SET status = 'retry', failure_count = $1, "
+                                "execution_time = NOW() + ($2 || ' minutes')::INTERVAL "
+                                "WHERE id = $3 AND status = 'running'",
                                 new_failures, str(cooldown_minutes), task_id
                             )
                             logger.warning(f"Task ID {task_id} retrying in {cooldown_minutes} minutes")
             except Exception as db_err:
                 logger.error(f"Failed to update task {task_id} status: {db_err}")
+
+        # CONCURRENCY-FIX C9: release this batch's persona leases now that the
+        # work is finished. Guarded by locked_by so we never drop a lease that
+        # another worker has meanwhile taken over.
+        await _release_persona_leases(_leased_personas)
+        _leased_personas = set()
 
         # v5.0+: small sleep between tasks (no concurrent batch)
         await asyncio.sleep(1)

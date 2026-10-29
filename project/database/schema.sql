@@ -56,8 +56,27 @@ CREATE TABLE personas (
     -- 2026 Evasion Upgrade: Design Pattern 2 - Database-Based Pluggable AI Keys
     ai_provider VARCHAR(32) NOT NULL DEFAULT 'openai',
     ai_model VARCHAR(64) NOT NULL DEFAULT 'gpt-4o-mini',
-    ai_api_key TEXT NOT NULL DEFAULT '' -- Plaintext API Key storage as requested
+    ai_api_key TEXT NOT NULL DEFAULT '', -- Plaintext API Key storage as requested
+
+    -- CONCURRENCY-FIX C9: persona-level lease. The task queue only ever
+    -- claimed a *task*; nothing stopped two workers from running two
+    -- different tasks for the SAME persona at the same time, which put one
+    -- account in two browsers at once (concurrent sessions, interleaved
+    -- cookie writes, session_data lost to a blind overwrite).
+    -- A worker must take this lease before it may execute a task for the
+    -- persona. The lease self-heals: locked_until expires on its own, so a
+    -- crashed worker cannot deadlock a persona forever.
+    locked_by VARCHAR(128),
+    locked_until TIMESTAMP WITH TIME ZONE
 );
+
+-- CONCURRENCY-FIX C9: the queue query filters on lock expiry on every poll.
+CREATE INDEX IF NOT EXISTS idx_personas_locked_until
+    ON personas(locked_until);
+
+-- CONCURRENCY-FIX C6: the queue query now also filters on cooldown expiry.
+CREATE INDEX IF NOT EXISTS idx_personas_cooldown_until
+    ON personas(cooldown_until);
 
 -- PPPC (Persistent Persona Per City): migration adds task_count column
 -- to the existing personas table. ADD COLUMN IF NOT EXISTS is idempotent.
@@ -81,15 +100,14 @@ CREATE TABLE persona_by_city (
 CREATE INDEX IF NOT EXISTS idx_persona_by_city_last_used ON persona_by_city(last_used DESC);
 CREATE INDEX IF NOT EXISTS idx_persona_by_city_persona_id ON persona_by_city(persona_id);
 
--- Upgraded logged queue state with HOT update optimizations (survives cold restarts)
-CREATE TABLE queue_state (
-    task_id SERIAL PRIMARY KEY,
-    persona_id VARCHAR(64) NOT NULL, -- Managed programmatically
-    action_type VARCHAR(32) NOT NULL,
-    priority INT DEFAULT 1,
-    assigned_worker VARCHAR(64),
-    locked_at TIMESTAMP WITH TIME ZONE
-) WITH (fillfactor = 70);
+-- CONCURRENCY-FIX C3: `queue_state` was DELETED.
+-- It carried exactly the locking fields this system needed (assigned_worker,
+-- locked_at) and -- verified across the whole repo -- no Python file ever
+-- referenced it; only its two indexes did. A table that looks like the queue's
+-- lock but is never read or written is a trap: it invites the assumption that
+-- task claiming is handled somewhere. The real lease now lives on
+-- tasks.claimed_by/claimed_at (C2) and personas.locked_by/locked_until (C9),
+-- which the daemon actually reads and writes.
 
 CREATE TABLE tasks (
     id SERIAL PRIMARY KEY,
@@ -99,8 +117,30 @@ CREATE TABLE tasks (
     status VARCHAR(16) DEFAULT 'pending',
     execution_time TIMESTAMP WITH TIME ZONE,
     error_log TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    -- CONCURRENCY-FIX C1: the daemon's queue query selects t.failure_count
+    -- (hardened_orchestrator.py) and the retry paths UPDATE it, but this column
+    -- was never declared. Against a DB built from this file, Postgres raised
+    -- UndefinedColumnError on the very first poll and the daemon never
+    -- processed a single task (it logs "Queue polling failed" and backs off
+    -- to 300s forever).
+    failure_count INT DEFAULT 0,
+    -- CONCURRENCY-FIX C2: lease columns backing the atomic task claim.
+    -- claimed_by  = worker that owns the row while status='running'
+    -- claimed_at  = when the lease was taken (used by the reaper to recycle
+    --               tasks whose worker crashed mid-execution)
+    claimed_by VARCHAR(128),
+    claimed_at TIMESTAMP WITH TIME ZONE
 );
+
+-- CONCURRENCY-FIX C2: the queue polls "oldest pending/retry first"; without an
+-- index this is a seq scan that grows linearly with task history.
+CREATE INDEX IF NOT EXISTS idx_tasks_status_created
+    ON tasks(status, created_at);
+
+-- CONCURRENCY-FIX C2: the reaper recycles leases older than the task timeout.
+CREATE INDEX IF NOT EXISTS idx_tasks_claimed_at
+    ON tasks(claimed_at) WHERE status = 'running';
 
 CREATE TABLE audit_logs (
     id SERIAL PRIMARY KEY,
@@ -111,9 +151,8 @@ CREATE TABLE audit_logs (
 );
 
 -- Indexes for performance
-CREATE INDEX idx_queue_persona ON queue_state(persona_id);
+-- (CONCURRENCY-FIX C3: the two queue_state indexes were dropped with the table.)
 CREATE INDEX idx_persona_cooldown_lookup ON personas(cooldown_until) WHERE state = 'cooldown';
-CREATE INDEX idx_queue_exec_priority ON queue_state(priority DESC);
 
 -- PPPC: also index persona_by_city
 CREATE INDEX IF NOT EXISTS idx_persona_by_city_last_used ON persona_by_city(last_used DESC);

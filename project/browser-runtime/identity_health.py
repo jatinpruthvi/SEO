@@ -218,51 +218,80 @@ class IdentityHealthMonitor:
         try:
             if success:
                 # Reset consecutive failures and restore to active state
+                # CONCURRENCY-FIX C5: guard the state transition.
+                # The previous statement reset state to 'active'
+                # unconditionally, so a success on one worker could silently
+                # clear a 'limited' quarantine set moments earlier by another
+                # worker (verified: persona went 'limited' -> 'active').
+                # 'limited' should require an operator to clear it, and
+                # 'rotated' personas are retired by definition.
                 await conn.execute("""
                     UPDATE personas
                     SET failure_count = 0, state = 'active', last_active = NOW()
                     WHERE id = $1
+                      AND state NOT IN ('limited', 'rotated')
                 """, persona_id)
                 logger.info(f"Telemetry: Dynamic health event reported success for: {persona_id}")
             else:
                 # Increment failure count and evaluate threshold state triggers
-                row = await conn.fetchrow(
-                    "SELECT failure_count FROM personas WHERE id = $1", persona_id
-                )
-                failures = (row['failure_count'] or 0) + 1 if row else 1
+                # CONCURRENCY-FIX C4: collapse the read-modify-write into ONE
+                # atomic statement.
+                #
+                # The previous code was:
+                #     row      = SELECT failure_count ...         # read
+                #     failures = row['failure_count'] + 1         # modify
+                #     UPDATE personas SET failure_count=failures  # write
+                # Two workers failing at the same time both read N and both
+                # wrote N+1, so one failure was lost (verified: 5 -> 6 instead
+                # of 7). The 8-failure 'limited' quarantine therefore triggered
+                # late or never under concurrency, and every cooldown was
+                # computed from an undercount.
+                #
+                # Everything is now derived in SQL from the pre-update value
+                # (inside SET, column references see the OLD row), and
+                # RETURNING hands back the new values so the log stays exact:
+                #   - failure_count = old + 1
+                #   - state         = 'limited' once old + 1 >= 8  (IDH-3)
+                #   - cooldown      = min(86400, 60 * 2**old), which is
+                #                     60 * 2**(f-1) for the new count f.
+                #                     POWER's exponent is capped at 11 so a
+                #                     long-lived persona cannot overflow:
+                #                     60 * 2**11 = 122880, which LEAST()
+                #                     then clamps to the 24h ceiling.
+                res = await conn.fetchrow("""
+                    UPDATE personas
+                    SET failure_count = COALESCE(failure_count, 0) + 1,
+                        state = CASE
+                            WHEN COALESCE(failure_count, 0) + 1 >= 8 THEN 'limited'
+                            ELSE 'cooldown'
+                        END,
+                        cooldown_until = NOW() + ((
+                            LEAST(86400, 60 * POWER(2,
+                                LEAST(COALESCE(failure_count, 0), 11))
+                            )::bigint
+                        )::text || ' seconds')::INTERVAL,
+                        last_active = NOW()
+                    WHERE id = $1
+                    RETURNING failure_count, state
+                """, persona_id)
+                if res is None:
+                    logger.warning(
+                        f"Telemetry: persona {persona_id} not found; "
+                        f"failure not recorded"
+                    )
+                    return
+                failures = int(res['failure_count'] or 0)
+                new_state = res['state']
 
-                # IDH-3: Dynamic State Transition. Threshold raised to 8
-                # to give personas more chances to recover before being
-                # marked 'limited' (which is essentially a burn).
-                new_state = 'cooldown'
-                if failures >= 8:
-                    new_state = 'limited'  # Quarantine state requiring IP rotation
-
-                # IDH-3: Exponential cooldown: 60s, 120s, 240s, 480s, 960s, ...
-                # Capped at 24 hours to prevent indefinite lockouts.
-                cooldown_seconds = min(86400, 60 * (2 ** (failures - 1)))
-                # E21 fix (Pass 17): Validate cooldown_seconds is
-                # positive. The previous code computed cooldown_seconds
-                # via `60 * (2 ** (failures - 1))`, which for failures=0
-                # would be 30 (60 * 2^-1 = 30). However, the conditional
-                # `if failures >= 8: new_state = 'limited'` ensures we
-                # only enter this branch for failures >= 1, so the
-                # minimum is 60s. But defense-in-depth: if a future
-                # refactor moves the conditional, we want to ensure
-                # cooldown_seconds is always positive to prevent a
-                # negative interval (which Postgres treats as "the
-                # past" and would put the persona in cooldown
-                # immediately-immune state — bypass vector).
+                # The UPDATE above already committed the counter, the state and
+                # the cooldown atomically. This recomputation exists ONLY to
+                # keep the log line accurate - it mirrors the SQL expression
+                # (min(86400, 60 * 2**(f-1)) for the new count f). It must not
+                # be written back to the database.
+                cooldown_seconds = min(86400, 60 * (2 ** max(failures - 1, 0)))
                 if cooldown_seconds < 1:
                     cooldown_seconds = 1
 
-                await conn.execute("""
-                    UPDATE personas
-                    SET failure_count = $1, state = $2,
-                        cooldown_until = NOW() + ($3 || ' seconds')::INTERVAL,
-                        last_active = NOW()
-                    WHERE id = $4
-                """, failures, new_state, str(cooldown_seconds), persona_id)
                 logger.warning(
                     f"Telemetry: Dynamic health event reported failure for: {persona_id} "
                     f"(Consecutive: {failures}, New State: {new_state}, "
