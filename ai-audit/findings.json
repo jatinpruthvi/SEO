@@ -1,0 +1,28 @@
+{
+ "repo": "https://github.com/jatinpruthvi/SEO",
+ "branch": "dolphin-audit",
+ "base_commit": "b5b48c5",
+ "model": "dolphin3-8b",
+ "date": "2026-10-31 05:17",
+ "files": 5,
+ "findings": [
+  {
+   "line": 18,
+   "severity": "high",
+   "category": "logic error",
+   "title": "Incorrect early exit if manifests directory does not exist.",
+   "detail": "The script exits immediately when the manifests directory is missing, preventing any further checks or processing. This can lead to incomplete or no output being generated.",
+   "fix": "Move the exit call to after all necessary checks and processing.",
+   "file": "project/cloak-runtime/scripts/build.js"
+  },
+  {
+   "line": 38,
+   "severity": "medium",
+   "category": "off-by-one",
+   "title": "Incorrect line count calculation.",
+   "detail": "The script counts lines in the generated runtime, but `split('\n').length` includes an extra line for the last newline character. This can cause incorrect output in logs and potentially mislead users.",
+   "fix": "Use `split('\n').length - 1` to correctly count the number of lines.",
+   "file": "project/cloak-runtime/scripts/build.js"
+  }
+ ]
+}
